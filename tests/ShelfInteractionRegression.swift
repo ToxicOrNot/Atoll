@@ -6,6 +6,9 @@ import Foundation
 struct ShelfInteractionRegression {
     @MainActor
     static func main() async throws {
+        // NSControl sends its target/action through NSApplication. A command-line
+        // test process must create it explicitly (the running app already has it).
+        _ = NSApplication.shared
         // A closed island may be hosted in an NSWindow hundreds of points tall.
         // The approach area must remain below the camera, including on displays
         // with negative origins. It must not depend on that window's bottom.

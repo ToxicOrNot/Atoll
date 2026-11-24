@@ -33,7 +33,7 @@ final class ShelfRemoveControl: NSButton {
         image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Remove from Shelf")
         imagePosition = .imageOnly
         isBordered = false
-        contentTintColor = .secondaryLabelColor
+        contentTintColor = .white.withAlphaComponent(0.7)
         toolTip = "Remove from Shelf"
         setAccessibilityLabel("Remove from Shelf")
         target = self

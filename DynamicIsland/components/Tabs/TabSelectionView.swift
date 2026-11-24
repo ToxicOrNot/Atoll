@@ -158,8 +158,10 @@ struct TabSelectionView: View {
             let destination = current + step
             guard visibleTabs.indices.contains(destination) else { return }
 
-            select(visibleTabs[destination])
-            coordinator.tabSwitchForward = step > 0
+            withAnimation(.snappy(duration: 0.23)) {
+                select(visibleTabs[destination])
+                coordinator.tabSwitchForward = step > 0
+            }
             if Defaults[.enableHaptics] {
                 NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
             }

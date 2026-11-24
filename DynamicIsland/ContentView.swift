@@ -251,6 +251,8 @@ struct ContentView: View {
     @State private var isHoveringClosedMusicWaveformControl: Bool = false
 
     @State private var gestureProgress: CGFloat = .zero
+    @State private var tabSwipeOffset: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceTabMotion
     @State private var isMusicControlWindowVisible = false
     @State private var pendingMusicControlTask: Task<Void, Never>?
     @State private var musicControlHideTask: Task<Void, Never>?
@@ -305,20 +307,20 @@ struct ContentView: View {
     private let musicControlPauseGrace: TimeInterval = 5
     private let musicControlResumeDelay: TimeInterval = 0.24
 
+    private struct TabContentIdentity: Hashable {
+        let view: NotchViews
+        let extensionID: String?
+    }
+
     // MARK: - Tab switch direction for smooth transitions
     
     private var tabSwitchTransition: AnyTransition {
-        if coordinator.tabSwitchForward {
-            return .asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
-            )
-        } else {
-            return .asymmetric(
-                insertion: .move(edge: .leading).combined(with: .opacity),
-                removal: .move(edge: .trailing).combined(with: .opacity)
-            )
-        }
+        guard !reduceTabMotion else { return .opacity }
+        let distance: CGFloat = coordinator.tabSwitchForward ? 34 : -34
+        return .asymmetric(
+            insertion: .offset(x: distance).combined(with: .opacity),
+            removal: .offset(x: -distance).combined(with: .opacity)
+        )
     }
     
     private var standardMediaControlsActive: Bool {
@@ -730,8 +732,8 @@ struct ContentView: View {
                             .panGesture(direction: .down) { translation, phase in
                                 handleDownGesture(translation: translation, phase: phase)
                             }
-                            .horizontalScrollGesture { forward in
-                                handleTabSwipe(forward: forward)
+                            .horizontalScrollGesture { translation, phase in
+                                handleTabSwipe(translation: translation, phase: phase)
                             }
                     }
             }
@@ -1308,7 +1310,8 @@ struct ContentView: View {
                                 }
                           }
                       }
-                      .id(coordinator.currentView)
+                      .id(TabContentIdentity(view: coordinator.currentView, extensionID:
+                          coordinator.currentView == .extensionExperience ? coordinator.selectedExtensionExperienceID : nil))
                       .transition(tabSwitchTransition)
                   }
               }
@@ -1316,7 +1319,8 @@ struct ContentView: View {
               .allowsHitTesting(vm.notchState == .open)
               .blur(radius: abs(gestureProgress) > 0.3 ? min(abs(gestureProgress), 8) : 0)
               .opacity(abs(gestureProgress) > 0.3 ? min(abs(gestureProgress * 2), 0.8) : 1)
-              .animation(.smooth(duration: 0.3), value: coordinator.currentView)
+              .offset(x: tabSwipeOffset)
+              .animation(.snappy(duration: 0.23), value: coordinator.currentView)
           }
       }
 
@@ -2643,12 +2647,24 @@ struct ContentView: View {
         }
     }
 
-    private func handleTabSwipe(forward: Bool) {
+    private func handleTabSwipe(translation: CGFloat, phase: NSEvent.Phase) {
+        if phase == .ended {
+            withAnimation(.snappy(duration: 0.2)) { tabSwipeOffset = 0 }
+            return
+        }
         guard enableHorizontalTabGestures, vm.notchState == .open,
               !enableMinimalisticUI, !lockScreenManager.isLocked, !hasAnyActivePopovers(),
-              !vm.isHoveringCalendar, !vm.isScrollGestureActive else { return }
+              !vm.isHoveringCalendar, !vm.isScrollGestureActive else {
+            tabSwipeOffset = 0
+            return
+        }
 
-        vm.tabSwipes.send(forward != Defaults[.reverseSwipeGestures])
+        if phase == .began {
+            withAnimation(.snappy(duration: 0.23)) { tabSwipeOffset = 0 }
+            vm.tabSwipes.send((translation < 0) != Defaults[.reverseSwipeGestures])
+        } else if !reduceTabMotion {
+            tabSwipeOffset = max(-18, min(18, translation * 0.34))
+        }
     }
 
     private func handleMusicControlPlaybackChange(isPlaying: Bool) {

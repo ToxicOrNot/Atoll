@@ -43,7 +43,7 @@ struct HorizontalTabSwipe {
         self = Self()
     }
 
-    mutating func update(x: CGFloat, y: CGFloat, threshold: CGFloat) -> Bool? {
+    mutating func update(x: CGFloat, y: CGFloat, threshold: CGFloat) -> (offset: CGFloat, committed: Bool)? {
         guard !finished else { return nil }
         translation.width += x
         translation.height += y
@@ -54,18 +54,16 @@ struct HorizontalTabSwipe {
             finished = true
             return nil
         }
-        guard horizontal >= threshold, horizontal > vertical else { return nil }
+        guard horizontal > vertical, horizontal >= 5 else { return nil }
 
-        finished = true
-        return translation.width < 0
+        finished = horizontal >= threshold
+        return (translation.width, finished)
     }
 }
 
 extension View {
-    func horizontalScrollGesture(action: @escaping (Bool) -> Void) -> some View {
-        background(ScrollMonitor(direction: .horizontal, threshold: 4) { delta, _ in
-            action(delta < 0)
-        })
+    func horizontalScrollGesture(action: @escaping (CGFloat, NSEvent.Phase) -> Void) -> some View {
+        background(ScrollMonitor(direction: .horizontal, threshold: 4, action: action))
     }
 
     func panGesture(direction: PanDirection, threshold: CGFloat = 4, action: @escaping (CGFloat, NSEvent.Phase) -> Void) -> some View {
@@ -206,15 +204,17 @@ private struct ScrollMonitor: NSViewRepresentable {
                 tabSwipe.reset()
                 watchesTabSwipe = isCursorNearObservedView(using: event, excludeHorizontalScrollViews: true)
             } else if event.phase == .ended || event.phase == .cancelled {
+                if watchesTabSwipe { action(0, .ended) }
                 watchesTabSwipe = false
             }
+            let swipeThreshold = 14 + Defaults[.gestureSensitivity] * 0.2
             guard watchesTabSwipe, !event.phase.isEmpty,
-                  let forward = tabSwipe.update(
+                  let progress = tabSwipe.update(
                     x: event.scrollingDeltaX,
                     y: event.scrollingDeltaY,
-                    threshold: Defaults[.gestureSensitivity]
+                    threshold: swipeThreshold
                   ) else { return }
-            action(forward ? -1 : 1, .changed)
+            action(progress.offset, progress.committed ? .began : .changed)
         }
 
         private func isCursorNearObservedView(

@@ -302,6 +302,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         extensionRPCServer.stop()
         ShelfDragApproachMonitor.shared.stop()
         SavedScreenshotMonitor.shared.stop()
+        CodexApprovalMonitor.shared.stop()
         networkConnectivityManager.stopMonitoring()
         
         // Stop AudioTap capture
@@ -386,6 +387,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         var spaceWindows = currentDynamicIslandWindows()
         if let dropWindow = ShelfDragApproachMonitor.shared.activeDropWindow {
             spaceWindows.insert(dropWindow)
+        }
+        if let approvalWindow = CodexApprovalMonitor.shared.activeApprovalWindow {
+            spaceWindows.insert(approvalWindow)
         }
         NotchSpaceManager.shared.notchSpace.windows = spaceWindows
     }
@@ -764,6 +768,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // stored history back.
         ClipboardManager.purgeStoredHistoryIfPersistenceDisabled()
         SavedScreenshotMonitor.shared.start()
+        CodexApprovalMonitor.shared.start()
 
         // Setup ScreenRecording Manager
         if Defaults[.enableScreenRecordingDetection] && !AppRuntimeEnvironment.isUITesting {

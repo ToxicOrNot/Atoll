@@ -3,6 +3,9 @@ name: Build Atoll update
 on:
   push:
     branches: [build/atoll-dmg]
+  pull_request:
+    branches: [build/atoll-dmg]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,7 +25,7 @@ jobs:
           xcode-version: latest-stable
 
       - name: Verify project checks
-        run: python3 -m unittest tests.test_privacy_configuration tests.test_timer_lifecycle
+        run: python3 -m unittest tests.test_privacy_configuration tests.test_timer_lifecycle tests.test_shelf_interactions
 
       - name: Install Metal toolchain
         run: |

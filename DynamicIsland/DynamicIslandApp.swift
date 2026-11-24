@@ -93,13 +93,17 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     }
 }
 
-extension AppDelegate {
-    static var shared: AppDelegate? {
-        NSApplication.shared.delegate as? AppDelegate
-    }
-}
-
 class AppDelegate: NSObject, NSApplicationDelegate {
+    // SwiftUI installs an application-delegate proxy for
+    // @NSApplicationDelegateAdaptor. NSApplication.shared.delegate is not
+    // necessarily this instance, so casting it silently disables callers.
+    private(set) static weak var shared: AppDelegate?
+
+    override init() {
+        super.init()
+        Self.shared = self
+    }
+
     var statusItem: NSStatusItem?
     var windows: [NSScreen: NSWindow] = [:]
     var viewModels: [NSScreen: DynamicIslandViewModel] = [:]
@@ -479,6 +483,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func calculateRequiredNotchSize() -> CGSize {
+        if let size = vm.islandActivitySize {
+            return addShadowPadding(to: size, isMinimalistic: Defaults[.enableMinimalisticUI])
+        }
         if NetworkConnectivityHUDMetrics.isPresented(
             state: networkConnectivityManager.hudState,
             notchState: vm.notchState,
@@ -654,7 +661,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if Defaults[.showOnAllDisplays] {
             for (screen, window) in windows {
-                let screenSize = adjustedSizeForScreen(size, screen: screen)
+                let contentSize = viewModels[screen]?.islandActivitySize.map {
+                    addShadowPadding(to: $0, isMinimalistic: Defaults[.enableMinimalisticUI])
+                } ?? size
+                let screenSize = adjustedSizeForScreen(contentSize, screen: screen)
                 if force || window.atollIslandFrame.size != screenSize {
                     resizeWindow(window, on: screen, to: screenSize, animated: animated)
                 }

@@ -26,12 +26,7 @@ import Defaults
 
 import QuickLook
 
-/// Shared geometry for the button and the AppKit drag surface over the cell.
-private enum ShelfRemoveButton {
-    static let size: CGFloat = 20
-    static let inset: CGFloat = 2
-}
-
+/// Geometry shared with the native remove control above the drag surface.
 struct ShelfItemView: View {
     let item: ShelfItem
     @EnvironmentObject var vm: DynamicIslandViewModel
@@ -65,9 +60,6 @@ struct ShelfItemView: View {
                 .contentShape(Rectangle())
                 .animation(.easeInOut(duration: 0.1), value: debouncedDropTarget)
                 .animation(.easeInOut(duration: 0.1), value: isSelected)
-                .overlay(alignment: .topTrailing) {
-                    removeButton
-                }
                 // Keep removal reachable without hover (VoiceOver / keyboard):
                 // expose the item as one element with a named remove action.
                 .accessibilityElement(children: .combine)
@@ -148,27 +140,6 @@ struct ShelfItemView: View {
             .truncationMode(.middle)
             .multilineTextAlignment(.center)
             .frame(height: 30, alignment: .top)
-    }
-
-    /// Uses the same shelf-only removal as the context menu.
-    private var removeButton: some View {
-        Button {
-            ShelfActionService.remove(item)
-        } label: {
-            Circle()
-                .fill(.white.opacity(0.18))
-                .frame(width: ShelfRemoveButton.size, height: ShelfRemoveButton.size)
-                .overlay(
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.white)
-                )
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-        .padding(ShelfRemoveButton.inset)
-        .help("Remove from Shelf")
-        .accessibilityLabel("Remove from Shelf")
     }
 
     private var backgroundView: some View {
@@ -294,7 +265,7 @@ private struct DraggableClickHandler<Content: View>: NSViewRepresentable {
         var onRightClick: ((NSEvent, NSView) -> Void)?
         var onClick: ((NSEvent, NSView) -> Void)?
         var onDragEnded: (() -> Void)?
-        var isRightToLeft = false
+        var isRightToLeft = false { didSet { needsLayout = true } }
 
         private var mouseDownEvent: NSEvent?
         private let dragThreshold: CGFloat = ShelfDragMetrics.threshold
@@ -311,18 +282,20 @@ private struct DraggableClickHandler<Content: View>: NSViewRepresentable {
             }
         }
 
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            let local = convert(point, from: superview)
-            let size = ShelfRemoveButton.size
-            let inset = ShelfRemoveButton.inset
-            let button = CGRect(
-                x: isRightToLeft ? bounds.minX + inset : bounds.maxX - inset - size,
-                y: isFlipped ? bounds.minY + inset : bounds.maxY - inset - size,
-                width: size,
-                height: size
+        private lazy var removeControl: ShelfRemoveControl = {
+            let button = ShelfRemoveControl { [weak self] in
+                guard let item = self?.item else { return }
+                ShelfActionService.remove(item)
+            }
+            addSubview(button)
+            return button
+        }()
+
+        override func layout() {
+            super.layout()
+            removeControl.frame = ShelfRemoveControl.frame(
+                in: bounds, isFlipped: isFlipped, isRightToLeft: isRightToLeft
             )
-            if button.contains(local) { return nil }
-            return super.hitTest(point)
         }
 
         override func rightMouseDown(with event: NSEvent) {

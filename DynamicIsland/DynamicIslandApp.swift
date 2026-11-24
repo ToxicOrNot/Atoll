@@ -384,11 +384,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// in fullscreen.
     @MainActor
     private func syncNotchSpaceMembership() {
-        var spaceWindows = currentDynamicIslandWindows()
-        if let approvalWindow = CodexApprovalMonitor.shared.activeApprovalWindow {
-            spaceWindows.insert(approvalWindow)
-        }
-        NotchSpaceManager.shared.notchSpace.windows = spaceWindows
+        NotchSpaceManager.shared.notchSpace.windows = currentDynamicIslandWindows()
     }
 
     private func currentDynamicIslandWindows() -> Set<NSWindow> {

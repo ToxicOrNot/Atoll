@@ -18,6 +18,7 @@
 
 import AppKit
 import Darwin
+import os
 import SwiftUI
 
 private struct CodexApprovalRequest: Decodable, Equatable {
@@ -39,12 +40,11 @@ final class CodexApprovalMonitor {
 
     private let root = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Atoll/CodexApprovals", isDirectory: true)
+    private static let log = os.Logger(subsystem: "com.atoll.DynamicIsland", category: "CodexApproval")
     private let size = CGSize(width: 430, height: 306)
     private var timer: Timer?
     private var panel: NSPanel?
     private var displayed: CodexApprovalRequest?
-
-    var activeApprovalWindow: NSWindow? { panel?.isVisible == true ? panel : nil }
 
     func start() {
         guard timer == nil else { return }
@@ -63,7 +63,6 @@ final class CodexApprovalMonitor {
 
     private func refresh() {
         guard !LockScreenManager.shared.isLocked, Self.isPrivateDirectory(root),
-              let window = notchWindow(),
               let names = try? FileManager.default.contentsOfDirectory(atPath: root.path)
         else {
             hide()
@@ -79,7 +78,7 @@ final class CodexApprovalMonitor {
             hide()
             return
         }
-        show(next, under: window)
+        show(next)
         guard panel?.isVisible == true else { return }
         for request in pending {
             let seen = requestDirectory(request.id).appendingPathComponent("seen")
@@ -130,16 +129,24 @@ final class CodexApprovalMonitor {
         return windows.first { $0.screen?.frame.contains(point) == true } ?? windows.first
     }
 
-    private func show(_ request: CodexApprovalRequest, under notch: NSWindow) {
-        guard let screen = notch.screen else {
+    private func show(_ request: CodexApprovalRequest) {
+        let notch = notchWindow()
+        let pointer = NSEvent.mouseLocation
+        guard let screen = notch?.screen
+            ?? NSScreen.screens.first(where: { $0.frame.contains(pointer) })
+            ?? NSScreen.main else {
             hide()
             return
         }
-        let bounds = screen.frame.insetBy(dx: 8, dy: 8)
+        let bounds = screen.visibleFrame.insetBy(dx: 8, dy: 8)
+        let top = min(notch?.atollIslandFrame.minY ?? bounds.maxY, bounds.maxY)
+        let width = min(size.width, bounds.width)
+        let height = min(size.height, bounds.height)
+        let centerX = notch?.atollIslandFrame.midX ?? bounds.midX
         let frame = CGRect(
-            x: min(max(notch.atollIslandFrame.midX - size.width / 2, bounds.minX), bounds.maxX - size.width),
-            y: max(bounds.minY, notch.atollIslandFrame.minY - size.height - 6),
-            width: size.width, height: size.height
+            x: min(max(centerX - width / 2, bounds.minX), bounds.maxX - width),
+            y: max(bounds.minY, top - height - 6),
+            width: width, height: height
         )
         let window: NSPanel
         if let panel {
@@ -159,24 +166,24 @@ final class CodexApprovalMonitor {
         }
 
         if displayed != request {
+            Self.log.notice("Loaded a local Codex permission request")
             displayed = request
             window.contentView = FirstMouseHostingView(rootView: CodexApprovalView(request: request) { [weak self] decision in
                 self?.resolve(decision, request: request)
             })
         }
-        window.level = NSWindow.Level(rawValue: notch.level.rawValue + 1)
+        window.level = NSWindow.Level(rawValue: (notch?.level ?? .mainMenu).rawValue + 1)
         if window.frame != frame {
             window.setFrame(frame, display: true)
         }
         if !window.isVisible {
             window.orderFrontRegardless()
-            NotchSpaceManager.shared.notchSpace.windows.insert(window)
+            Self.log.notice("Ordered the Codex approval panel onto the screen")
         }
     }
 
     private func hide() {
         if let panel, displayed != nil {
-            NotchSpaceManager.shared.notchSpace.windows.remove(panel)
             panel.orderOut(nil)
             panel.contentView = nil
         }

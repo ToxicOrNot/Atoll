@@ -35,7 +35,6 @@ jobs:
 
       - name: Build for Apple silicon
         run: |
-          plutil -remove com.apple.security.mach-services DynamicIsland/DynamicIsland.entitlements
           xcodebuild build \
             -project DynamicIsland.xcodeproj \
             -scheme DynamicIsland \

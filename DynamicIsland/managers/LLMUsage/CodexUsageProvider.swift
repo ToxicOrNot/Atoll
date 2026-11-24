@@ -5,7 +5,14 @@ struct CodexUsageProvider: UsageProvider {
     let root: URL
     let quotaClient: CodexQuotaClient
 
-    init(root: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions"), quotaClient: CodexQuotaClient = CodexQuotaClient()) {
+    static var sessionsDirectory: URL {
+        if let home = ProcessInfo.processInfo.environment["CODEX_HOME"], !home.isEmpty {
+            return URL(fileURLWithPath: home, isDirectory: true).appendingPathComponent("sessions")
+        }
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+    }
+
+    init(root: URL = Self.sessionsDirectory, quotaClient: CodexQuotaClient = CodexQuotaClient()) {
         self.root = root
         self.quotaClient = quotaClient
     }
@@ -23,6 +30,15 @@ struct CodexUsageProvider: UsageProvider {
         let quota = await quotaClient.fetchLimits()
         snapshot.sessionLimit = quota.session
         snapshot.weekLimit = quota.week
+        if snapshot.sessionLimit == nil || snapshot.weekLimit == nil,
+           let logged = JSONLUsageParser.latestCodexQuota(in: root, now: now) {
+            if snapshot.sessionLimit == nil, let window = logged.fiveHour {
+                snapshot.sessionLimit = UsageLimit(used: window.usedPercent, limit: 100, resetsAt: window.resetsAt)
+            }
+            if snapshot.weekLimit == nil, let window = logged.weekly {
+                snapshot.weekLimit = UsageLimit(used: window.usedPercent, limit: 100, resetsAt: window.resetsAt)
+            }
+        }
         return snapshot
     }
 }

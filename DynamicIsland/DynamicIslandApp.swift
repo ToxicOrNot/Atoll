@@ -385,9 +385,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func syncNotchSpaceMembership() {
         var spaceWindows = currentDynamicIslandWindows()
-        if let dropWindow = ShelfDragApproachMonitor.shared.activeDropWindow {
-            spaceWindows.insert(dropWindow)
-        }
         if let approvalWindow = CodexApprovalMonitor.shared.activeApprovalWindow {
             spaceWindows.insert(approvalWindow)
         }
@@ -435,12 +432,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.animationBehavior = .none
         // collectionBehavior is configured in DynamicIslandWindow.init
 
-        window.contentView = FirstMouseHostingView(
+        window.installIslandContent(FirstMouseHostingView(
             rootView: ContentView()
                 .environmentObject(viewModel)
                 .environmentObject(webcamManager)
-                //.moveToSky()
-        )
+        ))
         
         window.orderFrontRegardless()
         NotchSpaceManager.shared.notchSpace.windows.insert(window)
@@ -457,12 +453,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let screenFrame = screen.frame
         let topBleed = notchTopScreenBleed(for: screen.localizedName)
         let centerX = screenFrame.origin.x + (screenFrame.width / 2)
-        let roundedWidth = window.frame.width.rounded()
-        let roundedHeight = window.frame.height.rounded()
+        let roundedWidth = window.atollIslandFrame.width.rounded()
+        let roundedHeight = window.atollIslandFrame.height.rounded()
         let newX = (centerX - (roundedWidth / 2)).rounded()
         let newY = (screenFrame.maxY + topBleed - roundedHeight).rounded()
 
-        window.setFrame(NSRect(
+        window.setAtollIslandFrame(NSRect(
             x: newX,
             y: newY,
             width: roundedWidth,
@@ -663,7 +659,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if Defaults[.showOnAllDisplays] {
             for (screen, window) in windows {
                 let screenSize = adjustedSizeForScreen(size, screen: screen)
-                if force || window.frame.size != screenSize {
+                if force || window.atollIslandFrame.size != screenSize {
                     resizeWindow(window, on: screen, to: screenSize, animated: animated)
                 }
             }
@@ -671,7 +667,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let screen = window.screen ?? NSScreen.screens.first { $0.frame.intersects(window.frame) } ?? NSScreen.main ?? NSScreen.screens.first
             guard let screen else { return }
             let screenSize = adjustedSizeForScreen(size, screen: screen)
-            if force || window.frame.size != screenSize {
+            if force || window.atollIslandFrame.size != screenSize {
                 resizeWindow(window, on: screen, to: screenSize, animated: animated)
             }
         }
@@ -692,8 +688,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // `open()` intentionally requests a forced resize so every display is
         // considered, but an unchanged frame still needs no AppKit display
         // transaction. Avoiding that no-op matters during hover/click opens.
-        guard window.frame != targetFrame else { return }
-        window.setFrame(targetFrame, display: true)
+        guard window.atollIslandFrame != targetFrame else { return }
+        window.setAtollIslandFrame(targetFrame, display: true)
     }
 
     private func shouldAnimateResize(for newSize: CGSize) -> Bool {

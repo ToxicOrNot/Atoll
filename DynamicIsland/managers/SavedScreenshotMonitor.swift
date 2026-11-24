@@ -86,14 +86,14 @@ final class SavedScreenshotMonitor {
         previewPanel?.orderOut(nil)
         let size = CGSize(width: 52, height: 38)
         let target = CGRect(
-            x: notch.frame.midX - 8,
-            y: notch.frame.maxY - 21,
+            x: notch.atollIslandFrame.midX - 8,
+            y: notch.atollIslandFrame.maxY - 21,
             width: 16, height: 12
         )
         let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let start = CGRect(
-            x: notch.frame.midX - size.width / 2,
-            y: notch.frame.minY - size.height - 26,
+            x: notch.atollIslandFrame.midX - size.width / 2,
+            y: notch.atollIslandFrame.minY - size.height - 26,
             width: size.width, height: size.height
         )
         let panel = NSPanel(

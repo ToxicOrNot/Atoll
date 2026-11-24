@@ -383,7 +383,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// in fullscreen.
     @MainActor
     private func syncNotchSpaceMembership() {
-        NotchSpaceManager.shared.notchSpace.windows = currentDynamicIslandWindows()
+        var spaceWindows = currentDynamicIslandWindows()
+        if let dropWindow = ShelfDragApproachMonitor.shared.activeDropWindow {
+            spaceWindows.insert(dropWindow)
+        }
+        NotchSpaceManager.shared.notchSpace.windows = spaceWindows
     }
 
     private func currentDynamicIslandWindows() -> Set<NSWindow> {

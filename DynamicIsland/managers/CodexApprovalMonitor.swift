@@ -39,7 +39,7 @@ final class CodexApprovalMonitor {
 
     private let root = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Atoll/CodexApprovals", isDirectory: true)
-    private let size = CGSize(width: 430, height: 256)
+    private let size = CGSize(width: 430, height: 306)
     private var timer: Timer?
     private var panel: NSPanel?
     private var displayed: CodexApprovalRequest?
@@ -203,14 +203,42 @@ final class CodexApprovalMonitor {
     }
 }
 
+@MainActor
+private final class CodexApprovalQuotaModel: ObservableObject {
+    @Published private(set) var quota: JSONLUsageParser.CodexQuota?
+
+    func load() async {
+        let root = CodexUsageProvider.sessionsDirectory
+        let latest = await Task.detached(priority: .utility) {
+            JSONLUsageParser.latestCodexQuota(in: root)
+        }.value
+        if !Task.isCancelled { quota = latest }
+    }
+}
+
 private struct CodexApprovalView: View {
     let request: CodexApprovalRequest
     let resolve: (CodexApprovalDecision) -> Void
+    @StateObject private var quotaModel = CodexApprovalQuotaModel()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Codex approval", systemImage: "lock.shield")
                 .font(.headline)
+
+            if let quota = quotaModel.quota {
+                HStack(spacing: 14) {
+                    if let window = quota.fiveHour {
+                        quotaWindow("5-hour", window)
+                    }
+                    if let window = quota.weekly {
+                        quotaWindow("Weekly", window)
+                    }
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .help(Text("Last recorded: \(quota.observedAt, style: .relative)"))
+            }
 
             Text(request.tool == "Bash" ? "Shell command" : "File changes")
                 .font(.subheadline.weight(.medium))
@@ -241,5 +269,19 @@ private struct CodexApprovalView: View {
         .foregroundStyle(.white)
         .background(.black, in: RoundedRectangle(cornerRadius: 20))
         .preferredColorScheme(.dark)
+        .task { await quotaModel.load() }
+    }
+
+    private func quotaWindow(_ label: LocalizedStringKey, _ window: JSONLUsageParser.CodexQuota.Window) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                Text(label)
+                Text("\(Int((100 - window.usedPercent).rounded()))% left")
+                    .fontWeight(.semibold)
+            }
+            if let reset = window.resetsAt {
+                Text("Resets in \(reset, style: .relative)")
+            }
+        }
     }
 }

@@ -45,6 +45,73 @@ struct JSONLUsageParser {
         return isoPlain.date(from: s)
     }
 
+    struct CodexQuota: Sendable {
+        struct Window: Sendable {
+            let usedPercent: Double
+            let resetsAt: Date?
+        }
+
+        let observedAt: Date
+        let fiveHour: Window?
+        let weekly: Window?
+    }
+
+    static func latestCodexQuota(in root: URL, now: Date = Date()) -> CodexQuota? {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        guard let entries = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        let recent = entries.compactMap { entry -> (URL, Date)? in
+            guard let url = entry as? URL, url.pathExtension == "jsonl",
+                  let values = try? url.resourceValues(forKeys: Set(keys)),
+                  values.isRegularFile == true, let modified = values.contentModificationDate
+            else { return nil }
+            return (url, modified)
+        }.sorted { $0.1 > $1.1 }.prefix(12)
+
+        return recent.compactMap { newestCodexQuota(inFile: $0.0, now: now) }
+            .max { $0.observedAt < $1.observedAt }
+    }
+
+    private static func newestCodexQuota(inFile url: URL, now: Date) -> CodexQuota? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        let limit: UInt64 = 256 * 1024
+        guard let end = try? file.seekToEnd(),
+              (try? file.seek(toOffset: end > limit ? end - limit : 0)) != nil,
+              let data = try? file.read(upToCount: Int(limit))
+        else { return nil }
+
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n").reversed()
+        return lines.lazy.filter { $0.contains("\"rate_limits\"") }
+            .compactMap { parseCodexQuota($0, now: now) }.first
+    }
+
+    private static func parseCodexQuota(_ line: Substring, now: Date) -> CodexQuota? {
+        guard let event = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              event["type"] as? String == "event_msg",
+              let timestamp = event["timestamp"] as? String, let observedAt = parseDate(timestamp),
+              let payload = event["payload"] as? [String: Any],
+              payload["type"] as? String == "token_count",
+              let limits = payload["rate_limits"] as? [String: Any],
+              (limits["limit_id"] as? String ?? "codex") == "codex"
+        else { return nil }
+
+        var windows: [Int: CodexQuota.Window] = [:]
+        for name in ["primary", "secondary"] {
+            guard let raw = limits[name] as? [String: Any],
+                  let minutes = raw["window_minutes"] as? Int, minutes > 0,
+                  let percent = raw["used_percent"] as? Double, percent.isFinite, percent >= 0
+            else { continue }
+            let reset = (raw["resets_at"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            guard reset.map({ $0 > now }) ?? (now.timeIntervalSince(observedAt) < 300) else { continue }
+            windows[minutes] = .init(usedPercent: min(percent, 100), resetsAt: reset)
+        }
+        guard windows[300] != nil || windows[10_080] != nil else { return nil }
+        return CodexQuota(observedAt: observedAt, fiveHour: windows[300], weekly: windows[10_080])
+    }
+
     static func parseLine(_ line: String) -> UsageRecord? {
         var codexModel: String? = nil
         return parseLine(line, codexModel: &codexModel)

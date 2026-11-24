@@ -404,6 +404,11 @@ class ClipboardManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.dragSafetyResetTimeout, execute: work)
     }
 
+    func addSavedScreenshot(_ url: URL) {
+        guard Defaults[.enableClipboardManager] else { return }
+        addToHistory(ClipboardItem(fileURLs: [url.absoluteString]))
+    }
+
     func copyToClipboard(_ item: ClipboardItem) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()

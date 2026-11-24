@@ -301,6 +301,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         extensionXPCServiceHost.stop()
         extensionRPCServer.stop()
         ShelfDragApproachMonitor.shared.stop()
+        SavedScreenshotMonitor.shared.stop()
         networkConnectivityManager.stopMonitoring()
         
         // Stop AudioTap capture
@@ -758,6 +759,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Honour "Save History Across Restarts" before anything can read the
         // stored history back.
         ClipboardManager.purgeStoredHistoryIfPersistenceDisabled()
+        SavedScreenshotMonitor.shared.start()
 
         // Setup ScreenRecording Manager
         if Defaults[.enableScreenRecordingDetection] && !AppRuntimeEnvironment.isUITesting {

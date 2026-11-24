@@ -130,8 +130,10 @@ final class ShelfStateViewModel: ObservableObject {
         ExtensionRPCServer.shared.notifyShelfItemsChanged(itemIDs: addedIDs, action: "added")
     }
 
-    func remove(_ item: ShelfItem) {
-        item.cleanupStoredData()
+    func remove(_ item: ShelfItem, cleanupTemporaryFile: Bool = true) {
+        if cleanupTemporaryFile {
+            item.cleanupStoredData()
+        }
         items.removeAll { $0.id == item.id }
         invalidateURLCache()
         ExtensionRPCServer.shared.notifyShelfItemsChanged(itemIDs: [item.id.uuidString], action: "removed")

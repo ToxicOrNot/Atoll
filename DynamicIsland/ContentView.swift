@@ -108,6 +108,7 @@ struct ContentView: View {
     
     // Dynamic sizing based on view type and graph count with smooth transitions
     var dynamicNotchSize: CGSize {
+        if let size = vm.islandActivitySize { return size }
         let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSize
 
         if isConnectivityHUDVisible,
@@ -653,8 +654,36 @@ struct ContentView: View {
         installRootLifecycleHandlers(on: rootBodyView)
     }
 
+    @ViewBuilder
+    private func islandActivityContent(_ activity: IslandActivity) -> some View {
+        VStack(spacing: 0) {
+            // Keep all text and buttons below the physical camera housing.
+            Color.clear.frame(height: vm.effectiveClosedNotchHeight)
+            switch activity {
+            case .codexApproval(let request):
+                CodexApprovalView(request: request) { decision in
+                    CodexApprovalMonitor.shared.resolve(decision, request: request)
+                }
+                .onAppear { CodexApprovalMonitor.shared.didPresent(request.id, in: vm) }
+                .onDisappear { CodexApprovalMonitor.shared.didDisappear(request.id) }
+            case .screenshot(_, let image):
+                SavedScreenshotFeedbackView(image: image)
+            }
+        }
+        .frame(width: vm.islandActivitySize?.width, height: vm.islandActivitySize?.height)
+    }
+
     private var mainLayoutBase: some View {
-        NotchLayout()
+        ZStack(alignment: .top) {
+            if let activity = vm.islandActivity {
+                islandActivityContent(activity)
+                    .id(activity.id)
+                    .transition(reduceTabMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
+            } else {
+                NotchLayout()
+            }
+        }
+            .animation(reduceTabMotion ? .easeInOut(duration: 0.2) : vm.animation, value: vm.islandActivity?.id)
             .frame(alignment: .top)
             // Connectivity HUD metrics already describe the complete surface.
             // Applying the regular closed-notch inset here makes that surface
@@ -2652,7 +2681,7 @@ struct ContentView: View {
             withAnimation(.snappy(duration: 0.2)) { tabSwipeOffset = 0 }
             return
         }
-        guard enableHorizontalTabGestures, vm.notchState == .open,
+        guard vm.islandActivity == nil, enableHorizontalTabGestures, vm.notchState == .open,
               !enableMinimalisticUI, !lockScreenManager.isLocked, !hasAnyActivePopovers(),
               !vm.isHoveringCalendar, !vm.isScrollGestureActive else {
             tabSwipeOffset = 0

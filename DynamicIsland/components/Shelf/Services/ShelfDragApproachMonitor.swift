@@ -20,6 +20,7 @@ import AppKit
 import CoreGraphics
 import Defaults
 import os
+import SwiftUI
 
 /// Extends the existing notch window while the primary button is held near it.
 @MainActor
@@ -30,10 +31,14 @@ final class ShelfDragApproachMonitor {
     private let autoCloseToken = UUID()
     private var timer: Timer?
     private var pressLocation: CGPoint?
+    private let dragPasteboard = NSPasteboard(name: .drag)
+    private var idlePasteboardChangeCount: Int?
     private var releasedAt: TimeInterval?
     private weak var window: DynamicIslandWindow?
     private weak var island: DynamicIslandViewModel?
     private var approachZone: CGRect?
+    private var wasOpen = false
+    private var previousView: NotchViews?
     private var openedShelf = false
     private var handedOffToShelf = false
 
@@ -41,6 +46,7 @@ final class ShelfDragApproachMonitor {
 
     func start() {
         guard timer == nil else { return }
+        idlePasteboardChangeCount = dragPasteboard.changeCount
         // Finder's native drag loop may not deliver global mouse events to Atoll.
         let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
             MainActor.assumeIsolated { Self.shared.update() }
@@ -69,6 +75,7 @@ final class ShelfDragApproachMonitor {
             || CGEventSource.buttonState(.combinedSessionState, button: .left)
         if !buttonDown {
             pressLocation = nil
+            idlePasteboardChangeCount = dragPasteboard.changeCount
             guard approachZone != nil else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if let releasedAt {
@@ -82,6 +89,16 @@ final class ShelfDragApproachMonitor {
         releasedAt = nil
 
         let point = NSEvent.mouseLocation
+        // A held mouse button is also a selection or a window drag. The drag
+        // pasteboard must belong to a new, external file drag before opening.
+        guard dragPasteboard.changeCount != idlePasteboardChangeCount,
+              dragPasteboard.canReadObject(forClasses: [NSURL.self],
+                  options: [.urlReadingFileURLsOnly: true]),
+              !ShelfSelectionModel.shared.isDragging else {
+            if pressLocation == nil { pressLocation = point }
+            resetApproach()
+            return
+        }
         if pressLocation == nil { pressLocation = point }
         guard canOpenShelf else {
             resetApproach()
@@ -107,7 +124,8 @@ final class ShelfDragApproachMonitor {
         let allDisplays = Defaults[.showOnAllDisplays]
         guard let window = (allDisplays ? app.windows[screen] : app.window) as? DynamicIslandWindow,
               let island = allDisplays ? app.viewModels[screen] : app.vm,
-              window.isVisible, window.alphaValue > 0, island.notchState == .closed
+              window.isVisible, window.alphaValue > 0, island.islandActivity == nil,
+              island.notchState == .closed || DynamicIslandViewCoordinator.shared.currentView != .shelf
         else {
             resetApproach()
             return
@@ -121,11 +139,13 @@ final class ShelfDragApproachMonitor {
             return
         }
 
-        let bottom = max(screen.frame.minY, screen.frame.maxY - 190)
-        let width = min(max(frame.width, island.closedNotchSize.width) + 160, screen.frame.width)
-        let zone = CGRect(x: frame.midX - width / 2, y: bottom,
-                          width: width, height: frame.minY - bottom)
-        guard zone.height > 0, zone.insetBy(dx: -42, dy: -60).contains(point) else {
+        // The native window can retain its expanded height after closing so
+        // SwiftUI has room to animate. Its bottom edge is NOT the closed notch.
+        let zone = ShelfDragApproachGeometry.zone(
+            screenFrame: screen.frame, centerX: frame.midX,
+            closedSize: island.closedNotchSize
+        )
+        guard zone.insetBy(dx: -42, dy: -60).contains(point) else {
             resetApproach()
             return
         }
@@ -135,18 +155,26 @@ final class ShelfDragApproachMonitor {
         self.island = island
         approachZone = zone
         window.setShelfDropZone(zone)
-        Self.log.debug("Armed drop view in the notch window")
+        // Do not wait for draggingEntered: AppKit can keep the previous
+        // destination cached when a window grows underneath a stationary drag.
+        // We already validated the native file-drag pasteboard above.
+        _ = enter(window)
+        Self.log.debug("Opened shelf for an approaching native file drag")
     }
 
     fileprivate func enter(_ window: NSWindow?) -> Bool {
         guard canOpenShelf, let window, self.window === window, let island else { return false }
         if openedShelf { return true }
-        guard island.notchState == .closed else { return false }
+        guard island.islandActivity == nil else { return false }
 
+        wasOpen = island.notchState == .open
+        previousView = DynamicIslandViewCoordinator.shared.currentView
         openedShelf = true
         island.setAutoCloseSuppression(true, token: autoCloseToken)
-        DynamicIslandViewCoordinator.shared.currentView = .shelf
-        island.open()
+        withAnimation(island.animation) {
+            DynamicIslandViewCoordinator.shared.currentView = .shelf
+            island.open()
+        }
         Self.log.notice("Opened File Shelf after a file entered the expanded drop view")
         return true
     }
@@ -170,6 +198,8 @@ final class ShelfDragApproachMonitor {
             approachZone = nil
             openedShelf = false
             handedOffToShelf = false
+            previousView = nil
+            wasOpen = false
         }
         window?.setShelfDropZone(nil)
         guard openedShelf, let island else { return }
@@ -177,7 +207,10 @@ final class ShelfDragApproachMonitor {
         guard !handedOffToShelf, island.notchState == .open, !island.isAutoCloseSuppressed,
               !island.anyDropZoneTargeting, !island.dropEvent,
               DynamicIslandViewCoordinator.shared.currentView == .shelf else { return }
-        island.close()
+        withAnimation(island.animation) {
+            if let previousView { DynamicIslandViewCoordinator.shared.currentView = previousView }
+            if wasOpen { island.open() } else { island.close() }
+        }
     }
 }
 
@@ -191,12 +224,6 @@ final class ShelfApproachDropView: NSView {
     }
 
     required init?(coder: NSCoder) { nil }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        NSColor.black.withAlphaComponent(0.14).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
-    }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         draggingUpdated(sender)

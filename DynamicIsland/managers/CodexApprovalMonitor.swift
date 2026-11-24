@@ -21,7 +21,7 @@ import Darwin
 import os
 import SwiftUI
 
-private struct CodexApprovalRequest: Decodable, Equatable {
+struct CodexApprovalRequest: Decodable, Equatable {
     let id: UUID
     let createdAt: TimeInterval
     let expiresAt: TimeInterval
@@ -30,7 +30,7 @@ private struct CodexApprovalRequest: Decodable, Equatable {
     let input: String
 }
 
-private enum CodexApprovalDecision: String {
+enum CodexApprovalDecision: String {
     case allow, deny, deferToCodex
 }
 
@@ -41,9 +41,10 @@ final class CodexApprovalMonitor {
     private let root = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Atoll/CodexApprovals", isDirectory: true)
     private static let log = os.Logger(subsystem: "com.atoll.DynamicIsland", category: "CodexApproval")
-    private let size = CGSize(width: 430, height: 306)
     private var timer: Timer?
-    private var panel: NSPanel?
+    private weak var presentationModel: DynamicIslandViewModel?
+    private weak var presentationWindow: NSWindow?
+    private var visibleRequestID: UUID?
     private var displayed: CodexApprovalRequest?
 
     func start() {
@@ -79,12 +80,27 @@ final class CodexApprovalMonitor {
             return
         }
         show(next)
-        guard panel?.isVisible == true else { return }
-        for request in pending {
-            let seen = requestDirectory(request.id).appendingPathComponent("seen")
-            if !FileManager.default.fileExists(atPath: seen.path) {
-                try? Data().write(to: seen, options: [.atomic])
-            }
+        acknowledgeVisibleRequest()
+    }
+
+    func didPresent(_ id: UUID, in model: DynamicIslandViewModel) {
+        guard displayed?.id == id, presentationModel === model else { return }
+        visibleRequestID = id
+        acknowledgeVisibleRequest()
+    }
+
+    func didDisappear(_ id: UUID) {
+        if visibleRequestID == id { visibleRequestID = nil }
+    }
+
+    private func acknowledgeVisibleRequest() {
+        guard let displayed, visibleRequestID == displayed.id,
+              presentationModel?.islandActivity?.id == displayed.id,
+              presentationWindow?.isVisible == true,
+              (presentationWindow?.alphaValue ?? 0) > 0 else { return }
+        let seen = requestDirectory(displayed.id).appendingPathComponent("seen")
+        if !FileManager.default.fileExists(atPath: seen.path) {
+            try? Data().write(to: seen, options: [.atomic])
         }
     }
 
@@ -104,7 +120,7 @@ final class CodexApprovalMonitor {
         return request
     }
 
-    private func resolve(_ decision: CodexApprovalDecision, request proposed: CodexApprovalRequest) {
+    func resolve(_ decision: CodexApprovalDecision, request proposed: CodexApprovalRequest) {
         guard !LockScreenManager.shared.isLocked,
               displayed == proposed, request(for: proposed.id) == proposed else { return }
         let reply = requestDirectory(proposed.id).appendingPathComponent("reply")
@@ -121,73 +137,33 @@ final class CodexApprovalMonitor {
         }
     }
 
-    private func notchWindow() -> NSWindow? {
-        guard let app = AppDelegate.shared else { return nil }
-        if let window = app.window, window.isVisible, window.alphaValue > 0 { return window }
-        let point = NSEvent.mouseLocation
-        let windows = app.windows.values.filter { $0.isVisible && $0.alphaValue > 0 }
-        return windows.first { $0.screen?.frame.contains(point) == true } ?? windows.first
-    }
-
     private func show(_ request: CodexApprovalRequest) {
-        let notch = notchWindow()
-        let pointer = NSEvent.mouseLocation
-        guard let screen = notch?.screen
-            ?? NSScreen.screens.first(where: { $0.frame.contains(pointer) })
-            ?? NSScreen.main else {
+        if displayed == request,
+           presentationModel?.islandActivity?.id == request.id,
+           presentationWindow?.isVisible == true { return }
+        guard !DynamicIslandViewCoordinator.shared.firstLaunch,
+              let target = AppDelegate.shared?.islandActivityTarget() else {
             hide()
             return
         }
-        let bounds = screen.visibleFrame.insetBy(dx: 8, dy: 8)
-        let top = min(notch?.atollIslandFrame.minY ?? bounds.maxY, bounds.maxY)
-        let width = min(size.width, bounds.width)
-        let height = min(size.height, bounds.height)
-        let centerX = notch?.atollIslandFrame.midX ?? bounds.midX
-        let frame = CGRect(
-            x: min(max(centerX - width / 2, bounds.minX), bounds.maxX - width),
-            y: max(bounds.minY, top - height - 6),
-            width: width, height: height
-        )
-        let window: NSPanel
-        if let panel {
-            window = panel
-        } else {
-            window = NSPanel(
-                contentRect: frame, styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered, defer: false
-            )
-            window.backgroundColor = .clear
-            window.isOpaque = false
-            window.hidesOnDeactivate = false
-            window.hasShadow = true
-            window.collectionBehavior = DynamicIslandWindow.pinnedCollectionBehavior
-            ScreenCaptureVisibilityManager.shared.register(window, scope: .entireInterface)
-            panel = window
-        }
-
-        if displayed != request {
-            Self.log.notice("Loaded a local Codex permission request")
-            displayed = request
-            window.contentView = FirstMouseHostingView(rootView: CodexApprovalView(request: request) { [weak self] decision in
-                self?.resolve(decision, request: request)
-            })
-        }
-        window.level = NSWindow.Level(rawValue: (notch?.level ?? .mainMenu).rawValue + 1)
-        if window.frame != frame {
-            window.setFrame(frame, display: true)
-        }
-        if !window.isVisible {
-            window.orderFrontRegardless()
-            Self.log.notice("Ordered the Codex approval panel onto the screen")
-        }
+        if presentationModel !== target.model { hide() }
+        displayed = request
+        presentationModel = target.model
+        presentationWindow = target.window
+        target.window.alphaValue = 1
+        target.window.orderFrontRegardless()
+        target.model.presentIslandActivity(.codexApproval(request))
+        Self.log.notice("Presented a local Codex permission request inside the island")
     }
 
     private func hide() {
-        if let panel, displayed != nil {
-            panel.orderOut(nil)
-            panel.contentView = nil
+        if let displayed {
+            presentationModel?.dismissIslandActivity(id: displayed.id)
         }
         displayed = nil
+        presentationModel = nil
+        presentationWindow = nil
+        visibleRequestID = nil
     }
 
     private static func isPrivateDirectory(_ url: URL) -> Bool {
@@ -223,15 +199,26 @@ private final class CodexApprovalQuotaModel: ObservableObject {
     }
 }
 
-private struct CodexApprovalView: View {
+struct CodexApprovalView: View {
     let request: CodexApprovalRequest
     let resolve: (CodexApprovalDecision) -> Void
     @StateObject private var quotaModel = CodexApprovalQuotaModel()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Codex approval", systemImage: "lock.shield")
-                .font(.headline)
+            HStack(spacing: 10) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 20)).foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Codex").font(.system(size: 14, weight: .semibold))
+                    Text("Permission requested").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(request.tool == "Bash" ? "Command" : "File changes")
+                    .font(.system(size: 10, weight: .medium))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(.white.opacity(0.1), in: Capsule())
+            }
 
             if let quota = quotaModel.quota {
                 HStack(spacing: 14) {
@@ -246,9 +233,6 @@ private struct CodexApprovalView: View {
                 .foregroundStyle(.secondary)
                 .help(Text("Last recorded: \(quota.observedAt, style: .relative)"))
             }
-
-            Text(request.tool == "Bash" ? "Shell command" : "File changes")
-                .font(.subheadline.weight(.medium))
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
@@ -272,9 +256,9 @@ private struct CodexApprovalView: View {
             .buttonStyle(.bordered)
         }
         .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+        .frame(height: 292)
         .foregroundStyle(.white)
-        .background(.black, in: RoundedRectangle(cornerRadius: 20))
         .preferredColorScheme(.dark)
         .task { await quotaModel.load() }
     }

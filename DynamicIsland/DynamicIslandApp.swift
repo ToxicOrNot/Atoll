@@ -479,6 +479,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func calculateRequiredNotchSize() -> CGSize {
+        if let size = vm.islandActivitySize {
+            return addShadowPadding(to: size, isMinimalistic: Defaults[.enableMinimalisticUI])
+        }
         if NetworkConnectivityHUDMetrics.isPresented(
             state: networkConnectivityManager.hudState,
             notchState: vm.notchState,
@@ -654,7 +657,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if Defaults[.showOnAllDisplays] {
             for (screen, window) in windows {
-                let screenSize = adjustedSizeForScreen(size, screen: screen)
+                let contentSize = viewModels[screen]?.islandActivitySize.map {
+                    addShadowPadding(to: $0, isMinimalistic: Defaults[.enableMinimalisticUI])
+                } ?? size
+                let screenSize = adjustedSizeForScreen(contentSize, screen: screen)
                 if force || window.atollIslandFrame.size != screenSize {
                     resizeWindow(window, on: screen, to: screenSize, animated: animated)
                 }

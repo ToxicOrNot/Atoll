@@ -28,6 +28,41 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     let animationLibrary: DynamicIslandAnimations = .init()
     let animation: Animation?
 
+    @Published private(set) var islandActivity: IslandActivity?
+    private var wasOpenBeforeIslandActivity: Bool?
+    private let islandActivityAutoCloseToken = UUID()
+
+    var islandActivitySize: CGSize? {
+        islandActivity?.size(closedNotchHeight: effectiveClosedNotchHeight)
+    }
+
+    func presentIslandActivity(_ activity: IslandActivity) {
+        guard !LockScreenManager.shared.isLocked else { return }
+        if islandActivity == nil { wasOpenBeforeIslandActivity = notchState == .open }
+        setAutoCloseSuppression(true, token: islandActivityAutoCloseToken)
+        withAnimation(animation) {
+            islandActivity = activity
+            open()
+        }
+    }
+
+    func dismissIslandActivity(id: UUID) {
+        guard islandActivity?.id == id else { return }
+        let restoreOpen = wasOpenBeforeIslandActivity == true
+        wasOpenBeforeIslandActivity = nil
+        setAutoCloseSuppression(false, token: islandActivityAutoCloseToken)
+        withAnimation(animation) {
+            islandActivity = nil
+            if LockScreenManager.shared.isLocked {
+                closeForLockScreen()
+            } else if restoreOpen {
+                open()
+            } else {
+                close()
+            }
+        }
+    }
+
     @Published var contentType: ContentType = .normal
     @Published private(set) var notchState: NotchState = .closed
 
@@ -420,6 +455,7 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
     
     private func calculateDynamicNotchSize() -> CGSize {
+        if let islandActivitySize { return islandActivitySize }
         let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: shouldUseDynamicIslandMode(for: screen)) : openNotchSize
         var adjustedSize = baseSize
 
@@ -442,6 +478,9 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
 
     func close() {
+        // Approval requests and import feedback own their lifetime. Hover exit
+        // and close gestures must not interrupt an explicit decision.
+        guard islandActivity == nil else { return }
         let targetSize = getClosedNotchSize(screen: screen)
         notchSize = targetSize
         closedNotchSize = targetSize
@@ -459,6 +498,8 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
 
     func closeForLockScreen() {
+        islandActivity = nil
+        wasOpenBeforeIslandActivity = nil
         let targetSize = getClosedNotchSize(screen: screen)
         withAnimation(.none) {
             notchSize = targetSize

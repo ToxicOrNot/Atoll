@@ -1,4 +1,4 @@
-name: Build Atoll DMG
+name: Build Atoll update
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  dmg:
+  update:
     runs-on: macos-26
     timeout-minutes: 45
     steps:
@@ -47,7 +47,7 @@ jobs:
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
 
-      - name: Package and verify DMG
+      - name: Package and verify the app update
         run: |
           app='build/Build/Products/Release/Atoll.app'
           plist="$app/Contents/Info.plist"
@@ -60,18 +60,17 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app"
           lipo "$app/Contents/MacOS/Atoll" -verify_arch arm64
 
-          mkdir -p build/dmg build/dist
-          ditto "$app" build/dmg/Atoll.app
-          ln -s /Applications build/dmg/Applications
-          image=build/dist/Atoll-ToxicOrNot-arm64.dmg
-          hdiutil create -volname 'Atoll' -srcfolder build/dmg -format UDZO "$image"
-          hdiutil verify "$image"
-          shasum -a 256 "$image"
+          mkdir -p build/dist build/verify
+          archive=build/dist/Atoll-ToxicOrNot-update.zip
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+          ditto -x -k "$archive" build/verify
+          codesign --verify --deep --strict build/verify/Atoll.app
+          shasum -a 256 "$archive" build/verify/Atoll.app/Contents/MacOS/Atoll
 
-      - name: Upload the DMG
+      - name: Upload the app update
         uses: actions/upload-artifact@v4
         with:
-          name: Atoll-ToxicOrNot-arm64
-          path: build/dist/Atoll-ToxicOrNot-arm64.dmg
+          name: Atoll-ToxicOrNot-update
+          path: build/dist/Atoll-ToxicOrNot-update.zip
           if-no-files-found: error
           retention-days: 30

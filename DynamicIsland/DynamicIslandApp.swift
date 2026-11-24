@@ -93,13 +93,17 @@ final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     }
 }
 
-extension AppDelegate {
-    static var shared: AppDelegate? {
-        NSApplication.shared.delegate as? AppDelegate
-    }
-}
-
 class AppDelegate: NSObject, NSApplicationDelegate {
+    // SwiftUI installs an application-delegate proxy for
+    // @NSApplicationDelegateAdaptor. NSApplication.shared.delegate is not
+    // necessarily this instance, so casting it silently disables callers.
+    private(set) static weak var shared: AppDelegate?
+
+    override init() {
+        super.init()
+        Self.shared = self
+    }
+
     var statusItem: NSStatusItem?
     var windows: [NSScreen: NSWindow] = [:]
     var viewModels: [NSScreen: DynamicIslandViewModel] = [:]

@@ -26,7 +26,7 @@ import os
 final class ShelfDragApproachMonitor {
     static let shared = ShelfDragApproachMonitor()
 
-    private static let log = Logger(subsystem: "com.atoll.DynamicIsland", category: "ShelfDragApproach")
+    private static let log = os.Logger(subsystem: "com.atoll.DynamicIsland", category: "ShelfDragApproach")
     private let autoCloseToken = UUID()
     private var timer: Timer?
     private var pressLocation: CGPoint?

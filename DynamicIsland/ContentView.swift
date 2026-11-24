@@ -670,7 +670,8 @@ struct ContentView: View {
                 SavedScreenshotFeedbackView(image: image)
             }
         }
-        .frame(width: vm.islandActivitySize?.width, height: vm.islandActivitySize?.height)
+        .frame(maxWidth: .infinity)
+        .frame(height: vm.islandActivitySize?.height)
     }
 
     private var mainLayoutBase: some View {

@@ -2430,10 +2430,10 @@ struct ContentView: View {
     private func isPointInsideNotchWindow(_ point: CGPoint = NSEvent.mouseLocation) -> Bool {
         if let appDelegate = AppDelegate.shared {
             if Defaults[.showOnAllDisplays] {
-                return appDelegate.windows.values.contains(where: { frameContainsPointIncludingTopEdge($0.frame, point) })
+                return appDelegate.windows.values.contains(where: { frameContainsPointIncludingTopEdge($0.atollIslandFrame, point) })
             }
             if let window = appDelegate.window {
-                return frameContainsPointIncludingTopEdge(window.frame, point)
+                return frameContainsPointIncludingTopEdge(window.atollIslandFrame, point)
             }
         }
 

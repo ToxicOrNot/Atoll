@@ -17,65 +17,45 @@
  */
 
 import AppKit
+import CoreGraphics
 import Defaults
+import os
 
-/// Registers a native drop destination below the notch for external file drags.
+/// Extends the existing notch window while the primary button is held near it.
 @MainActor
 final class ShelfDragApproachMonitor {
     static let shared = ShelfDragApproachMonitor()
 
+    private static let log = Logger(subsystem: "com.atoll.DynamicIsland", category: "ShelfDragApproach")
     private let autoCloseToken = UUID()
-    private var mouseMonitor: Any?
-    private var dragTimer: Timer?
+    private var timer: Timer?
     private var pressLocation: CGPoint?
     private var releasedAt: TimeInterval?
-    private var panelArmed = false
-    private weak var armedWindow: NSWindow?
-    private weak var armedIsland: DynamicIslandViewModel?
-    private weak var openedIsland: DynamicIslandViewModel?
-    private var approachBounds = CGRect.zero
-
-    private lazy var dropPanel: NSPanel = {
-        let panel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        panel.isOpaque = false
-        panel.hidesOnDeactivate = false
-        panel.backgroundColor = NSColor.black.withAlphaComponent(0.08)
-        panel.hasShadow = false
-        panel.animationBehavior = .none
-        panel.collectionBehavior = DynamicIslandWindow.pinnedCollectionBehavior
-        panel.contentView = ApproachDropView()
-        return panel
-    }()
+    private weak var window: DynamicIslandWindow?
+    private weak var island: DynamicIslandViewModel?
+    private var approachZone: CGRect?
+    private var openedShelf = false
+    private var handedOffToShelf = false
 
     private init() {}
 
-    var activeDropWindow: NSWindow? { panelArmed ? dropPanel : nil }
-
     func start() {
-        guard mouseMonitor == nil else { return }
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged]) { event in
-            MainActor.assumeIsolated {
-                let monitor = Self.shared
-                if event.type == .leftMouseDown {
-                    monitor.beginTracking(from: NSEvent.mouseLocation)
-                } else if monitor.dragTimer == nil {
-                    monitor.beginTracking(from: nil)
-                }
-            }
+        guard timer == nil else { return }
+        // Finder's native drag loop may not deliver global mouse events to Atoll.
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
+            MainActor.assumeIsolated { Self.shared.update() }
         }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .eventTracking)
     }
 
     func stop() {
-        if let mouseMonitor {
-            NSEvent.removeMonitor(mouseMonitor)
-            self.mouseMonitor = nil
-        }
-        endTracking()
+        timer?.invalidate()
+        timer = nil
+        pressLocation = nil
+        releasedAt = nil
+        resetApproach()
     }
 
     private var canOpenShelf: Bool {
@@ -84,160 +64,161 @@ final class ShelfDragApproachMonitor {
             && !DynamicIslandViewCoordinator.shared.firstLaunch
     }
 
-    private func beginTracking(from point: CGPoint?) {
-        endTracking()
-        guard canOpenShelf else { return }
-        pressLocation = point
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
-            MainActor.assumeIsolated { Self.shared.update() }
-        }
-        dragTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
-        RunLoop.main.add(timer, forMode: .eventTracking)
-    }
-
     private func update() {
-        guard canOpenShelf else { endTracking(); return }
-        guard NSEvent.pressedMouseButtons & 1 != 0 else {
-            // AppKit may deliver the drop just after the physical button goes up.
+        let buttonDown = NSEvent.pressedMouseButtons & 1 != 0
+            || CGEventSource.buttonState(.combinedSessionState, button: .left)
+        if !buttonDown {
+            pressLocation = nil
+            guard approachZone != nil else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if let releasedAt {
-                if now - releasedAt >= 0.12 { endTracking() }
+                // Keep the target registered until AppKit sends the final drop.
+                if now - releasedAt >= 0.18 { resetApproach() }
             } else {
                 releasedAt = now
             }
             return
         }
+        releasedAt = nil
 
-        let location = NSEvent.mouseLocation
-        if let island = openedIsland {
-            if !approachBounds.contains(location) {
-                disarm()
-                releaseIsland()
-            } else if island.anyDropZoneTargeting {
+        let point = NSEvent.mouseLocation
+        if pressLocation == nil { pressLocation = point }
+        guard canOpenShelf else {
+            resetApproach()
+            return
+        }
+
+        if openedShelf, let island, let window, let approachZone {
+            if !window.isVisible || !approachZone.union(window.islandFrame).insetBy(dx: -24, dy: -24).contains(point) {
+                resetApproach()
+            } else if !handedOffToShelf && island.anyDropZoneTargeting {
+                handedOffToShelf = true
                 island.setAutoCloseSuppression(false, token: autoCloseToken)
             }
             return
         }
 
-        if let pressLocation, hypot(location.x - pressLocation.x, location.y - pressLocation.y) < 8 {
-            return
-        }
+        guard let start = pressLocation,
+              hypot(point.x - start.x, point.y - start.y) >= 8,
+              let app = AppDelegate.shared,
+              let screen = NSScreen.screens.first(where: { $0.frame.contains(point) })
+        else { return }
 
-        guard let app = AppDelegate.shared,
-              let screen = NSScreen.screens.first(where: { $0.frame.contains(location) }) else {
-            disarm()
-            return
-        }
         let allDisplays = Defaults[.showOnAllDisplays]
-        guard let window = allDisplays ? app.windows[screen] : app.window,
-              screen.frame.minX <= window.frame.midX, window.frame.midX < screen.frame.maxX,
-              abs(window.frame.maxY - screen.frame.maxY) < 32,
-              window.isVisible, window.alphaValue > 0,
+        guard let window = (allDisplays ? app.windows[screen] : app.window) as? DynamicIslandWindow,
               let island = allDisplays ? app.viewModels[screen] : app.vm,
-              island.notchState == .closed else {
-            disarm()
+              window.isVisible, window.alphaValue > 0, island.notchState == .closed
+        else {
+            resetApproach()
             return
         }
 
-        let depth: CGFloat = 184
-        let width = min(max(window.frame.width, island.closedNotchSize.width) + 176, screen.frame.width)
-        let zone = CGRect(x: window.frame.midX - width / 2, y: screen.frame.maxY - depth, width: width, height: depth)
-        // Arm before entry, so the native drag finds the destination on the way up.
-        guard zone.insetBy(dx: -52, dy: -72).contains(location) else { disarm(); return }
-        if armedWindow === window, dropPanel.frame == zone, dropPanel.isVisible { return }
+        let frame = window.islandFrame
+        guard frame.midX >= screen.frame.minX, frame.midX < screen.frame.maxX,
+              abs(frame.maxY - screen.frame.maxY) < 32
+        else {
+            resetApproach()
+            return
+        }
 
-        panelArmed = true
-        armedWindow = window
-        armedIsland = island
-        dropPanel.setFrame(zone, display: true)
-        dropPanel.level = NSWindow.Level(rawValue: window.level.rawValue - 1)
-        // The island uses a dedicated Space. Ordering relative to it from a different
-        // Space can leave the drop panel underneath Finder while the drag is in flight.
-        dropPanel.orderFrontRegardless()
-        NotchSpaceManager.shared.notchSpace.windows.insert(dropPanel)
+        let bottom = max(screen.frame.minY, screen.frame.maxY - 190)
+        let width = min(max(frame.width, island.closedNotchSize.width) + 160, screen.frame.width)
+        let zone = CGRect(x: frame.midX - width / 2, y: bottom,
+                          width: width, height: frame.minY - bottom)
+        guard zone.height > 0, zone.insetBy(dx: -42, dy: -60).contains(point) else {
+            resetApproach()
+            return
+        }
+        if self.window === window, approachZone == zone { return }
+        resetApproach()
+        self.window = window
+        self.island = island
+        approachZone = zone
+        window.setShelfDropZone(zone)
+        Self.log.debug("Armed drop view in the notch window")
     }
 
-    private func openShelf() -> Bool {
-        guard canOpenShelf, let island = armedIsland, let window = armedWindow else { return false }
-        if openedIsland === island { return true }
+    fileprivate func enter(_ window: NSWindow?) -> Bool {
+        guard canOpenShelf, let window, self.window === window, let island else { return false }
+        if openedShelf { return true }
         guard island.notchState == .closed else { return false }
 
-        openedIsland = island
+        openedShelf = true
         island.setAutoCloseSuppression(true, token: autoCloseToken)
         DynamicIslandViewCoordinator.shared.currentView = .shelf
         island.open()
-        approachBounds = dropPanel.frame.union(window.frame).insetBy(dx: -24, dy: -24)
+        Self.log.notice("Opened File Shelf after a file entered the expanded drop view")
         return true
     }
 
-    private func endTracking() {
-        dragTimer?.invalidate()
-        dragTimer = nil
-        releasedAt = nil
-        disarm()
-        releaseIsland()
-    }
-
-    private func disarm() {
-        guard panelArmed else { return }
-        panelArmed = false
-        NotchSpaceManager.shared.notchSpace.windows.remove(dropPanel)
-        dropPanel.orderOut(nil)
-        armedWindow = nil
-        armedIsland = nil
-    }
-
-    private func releaseIsland() {
-        guard let island = openedIsland else { return }
-        openedIsland = nil
+    fileprivate func receive(_ urls: [URL], in window: NSWindow?) -> Bool {
+        guard !urls.isEmpty, openedShelf, let window, self.window === window, let island else { return false }
+        handedOffToShelf = true
         island.setAutoCloseSuppression(false, token: autoCloseToken)
-        guard island.notchState == .open, !island.isAutoCloseSuppressed,
+        Task {
+            ShelfStateViewModel.shared.add(await ShelfDropService.items(from: urls))
+        }
+        Self.log.notice("Accepted a file drop from the expanded drop view")
+        return true
+    }
+
+    private func resetApproach() {
+        guard approachZone != nil else { return }
+        defer {
+            window = nil
+            island = nil
+            approachZone = nil
+            openedShelf = false
+            handedOffToShelf = false
+        }
+        window?.setShelfDropZone(nil)
+        guard openedShelf, let island else { return }
+        island.setAutoCloseSuppression(false, token: autoCloseToken)
+        guard !handedOffToShelf, island.notchState == .open, !island.isAutoCloseSuppressed,
               !island.anyDropZoneTargeting, !island.dropEvent,
               DynamicIslandViewCoordinator.shared.currentView == .shelf else { return }
         island.close()
     }
+}
 
-    private final class ApproachDropView: NSView {
-        private static let filenames = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+/// A rendered native destination beneath the SwiftUI content of the same window.
+final class ShelfApproachDropView: NSView {
+    private static let filenames = NSPasteboard.PasteboardType("NSFilenamesPboardType")
 
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            registerForDraggedTypes([.fileURL, Self.filenames])
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL, Self.filenames])
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        NSColor.black.withAlphaComponent(0.14).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 12, yRadius: 12).fill()
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingSource == nil,
+              sender.draggingPasteboard.availableType(from: [.fileURL, Self.filenames]) != nil,
+              ShelfDragApproachMonitor.shared.enter(window) else { return [] }
+        return sender.draggingSourceOperationMask.contains(.copy) ? .copy : []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard sender.draggingSourceOperationMask.contains(.copy) else { return false }
+        let pasteboard = sender.draggingPasteboard
+        let objects = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        )
+        var urls = objects?.compactMap { $0 as? URL }.filter(\.isFileURL) ?? []
+        if urls.isEmpty, let paths = pasteboard.propertyList(forType: Self.filenames) as? [String] {
+            urls = paths.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0) }
         }
-
-        required init?(coder: NSCoder) { nil }
-
-        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-            draggingUpdated(sender)
-        }
-
-        override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-            guard sender.draggingSource == nil,
-                  sender.draggingPasteboard.availableType(from: [.fileURL, Self.filenames]) != nil,
-                  ShelfDragApproachMonitor.shared.openShelf() else { return [] }
-            return sender.draggingSourceOperationMask.contains(.copy) ? .copy : []
-        }
-
-        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-            guard sender.draggingSourceOperationMask.contains(.copy) else { return false }
-            let pasteboard = sender.draggingPasteboard
-            let objects = pasteboard.readObjects(
-                forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
-            )
-            var urls = objects?.compactMap { $0 as? URL } ?? []
-            if urls.isEmpty, let paths = pasteboard.propertyList(forType: Self.filenames) as? [String] {
-                urls = paths.filter { $0.hasPrefix("/") }.map { URL(fileURLWithPath: $0) }
-            }
-            let monitor = ShelfDragApproachMonitor.shared
-            guard !urls.isEmpty, let island = monitor.openedIsland else { return false }
-
-            monitor.openedIsland = nil
-            island.setAutoCloseSuppression(false, token: monitor.autoCloseToken)
-            Task {
-                ShelfStateViewModel.shared.add(await ShelfDropService.items(from: urls))
-            }
-            return true
-        }
+        return ShelfDragApproachMonitor.shared.receive(urls, in: window)
     }
 }

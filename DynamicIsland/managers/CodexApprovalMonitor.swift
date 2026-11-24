@@ -137,8 +137,8 @@ final class CodexApprovalMonitor {
         }
         let bounds = screen.frame.insetBy(dx: 8, dy: 8)
         let frame = CGRect(
-            x: min(max(notch.frame.midX - size.width / 2, bounds.minX), bounds.maxX - size.width),
-            y: max(bounds.minY, notch.frame.minY - size.height - 6),
+            x: min(max(notch.atollIslandFrame.midX - size.width / 2, bounds.minX), bounds.maxX - size.width),
+            y: max(bounds.minY, notch.atollIslandFrame.minY - size.height - 6),
             width: size.width, height: size.height
         )
         let window: NSPanel

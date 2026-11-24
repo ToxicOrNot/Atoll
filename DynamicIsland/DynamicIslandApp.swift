@@ -300,6 +300,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         extensionXPCServiceHost.stop()
         extensionRPCServer.stop()
+        ShelfDragApproachMonitor.shared.stop()
         networkConnectivityManager.stopMonitoring()
         
         // Stop AudioTap capture
@@ -708,6 +709,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LockScreenManager.shared.configure(viewModel: vm)
         extensionXPCServiceHost.start()
         extensionRPCServer.start()
+        ShelfDragApproachMonitor.shared.start()
         
         // Migrate legacy progress bar settings
         Defaults.Keys.migrateProgressBarStyle()

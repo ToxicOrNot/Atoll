@@ -58,7 +58,7 @@ jobs:
           plutil -replace SUEnableAutomaticChecks -bool false "$plist"
           codesign --force --sign - --preserve-metadata=entitlements,flags "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
-          lipo -verify_arch arm64 "$app/Contents/MacOS/Atoll"
+          lipo "$app/Contents/MacOS/Atoll" -verify_arch arm64
 
           mkdir -p build/dmg build/dist
           ditto "$app" build/dmg/Atoll.app
@@ -66,6 +66,7 @@ jobs:
           image=build/dist/Atoll-ToxicOrNot-arm64.dmg
           hdiutil create -volname 'Atoll' -srcfolder build/dmg -format UDZO "$image"
           hdiutil verify "$image"
+          shasum -a 256 "$image"
 
       - name: Upload the DMG
         uses: actions/upload-artifact@v4

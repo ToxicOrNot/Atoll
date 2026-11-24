@@ -21,19 +21,53 @@
  */
 
 import AppKit
+import Defaults
 import SwiftUI
 
 enum PanDirection {
-    case left, right, up, down
+    case horizontal, up, down
 
-    var isHorizontal: Bool { self == .left || self == .right }
-    var sign: CGFloat { (self == .right || self == .down) ? 1 : -1 }
+    var isHorizontal: Bool { self == .horizontal }
+    var sign: CGFloat { self == .up ? -1 : 1 }
 
     func signed(from translation: CGSize) -> CGFloat { (isHorizontal ? translation.width : translation.height) * sign }
     func signed(deltaX: CGFloat, deltaY: CGFloat) -> CGFloat { (isHorizontal ? deltaX : deltaY) * sign }
 }
 
+/// Locks onto the dominant axis and emits at most one switch per touch sequence.
+struct HorizontalTabSwipe {
+    private var translation: CGSize = .zero
+    private var finished = false
+
+    mutating func reset() {
+        self = Self()
+    }
+
+    mutating func update(x: CGFloat, y: CGFloat, threshold: CGFloat) -> Bool? {
+        guard !finished else { return nil }
+        translation.width += x
+        translation.height += y
+
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        if vertical >= 8 && vertical >= horizontal {
+            finished = true
+            return nil
+        }
+        guard horizontal >= threshold, horizontal > vertical else { return nil }
+
+        finished = true
+        return translation.width < 0
+    }
+}
+
 extension View {
+    func horizontalScrollGesture(action: @escaping (Bool) -> Void) -> some View {
+        background(ScrollMonitor(direction: .horizontal, threshold: 4) { delta, _ in
+            action(delta < 0)
+        })
+    }
+
     func panGesture(direction: PanDirection, threshold: CGFloat = 4, action: @escaping (CGFloat, NSEvent.Phase) -> Void) -> some View {
         self
             .gesture(
@@ -74,6 +108,8 @@ private struct ScrollMonitor: NSViewRepresentable {
         private var globalMonitor: Any?
         private var accumulated: CGFloat = 0
         private var active = false
+        private var tabSwipe = HorizontalTabSwipe()
+        private var watchesTabSwipe = false
         private let noiseThreshold: CGFloat = 0.2
         private weak var observedView: NSView?
         /// Small vertical inset so scroll gestures fire when the cursor
@@ -113,6 +149,8 @@ private struct ScrollMonitor: NSViewRepresentable {
             }
             accumulated = 0
             active = false
+            tabSwipe.reset()
+            watchesTabSwipe = false
             observedView = nil
             lastEventTimestamp = 0
         }
@@ -120,6 +158,10 @@ private struct ScrollMonitor: NSViewRepresentable {
         private func handleScroll(_ event: NSEvent) {
             guard lastEventTimestamp != event.timestamp else { return }
             lastEventTimestamp = event.timestamp
+            if direction == .horizontal {
+                handleTabScroll(event)
+                return
+            }
             guard isCursorNearObservedView(using: event) else { return }
 
             if event.phase == .ended || event.momentumPhase == .ended {
@@ -138,7 +180,7 @@ private struct ScrollMonitor: NSViewRepresentable {
             // then a run of momentum ones, and the gesture ends between the two --
             // so the momentum was accumulating from zero against the same
             // threshold the touch had just crossed, firing the action a second
-            // time. One swipe skipped two tracks.
+            // time.
             //
             // Discrete gestures read the touch, not the coast. The cost is that a
             // very light flick that only used to reach the threshold once momentum
@@ -157,7 +199,28 @@ private struct ScrollMonitor: NSViewRepresentable {
             }
         }
 
-        private func isCursorNearObservedView(using event: NSEvent) -> Bool {
+        private func handleTabScroll(_ event: NSEvent) {
+            guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
+
+            if event.phase == .began {
+                tabSwipe.reset()
+                watchesTabSwipe = isCursorNearObservedView(using: event, excludeHorizontalScrollViews: true)
+            } else if event.phase == .ended || event.phase == .cancelled {
+                watchesTabSwipe = false
+            }
+            guard watchesTabSwipe, !event.phase.isEmpty,
+                  let forward = tabSwipe.update(
+                    x: event.scrollingDeltaX,
+                    y: event.scrollingDeltaY,
+                    threshold: Defaults[.gestureSensitivity]
+                  ) else { return }
+            action(forward ? -1 : 1, .changed)
+        }
+
+        private func isCursorNearObservedView(
+            using event: NSEvent,
+            excludeHorizontalScrollViews: Bool = false
+        ) -> Bool {
             guard let view = observedView, let window = view.window else { return false }
 
             let screenPoint: NSPoint
@@ -169,6 +232,12 @@ private struct ScrollMonitor: NSViewRepresentable {
             }
 
             let windowPoint = window.convertPoint(fromScreen: screenPoint)
+            if excludeHorizontalScrollViews, let hitView = window.contentView?.hitTest(windowPoint),
+               let scrollView = (hitView as? NSScrollView) ?? hitView.enclosingScrollView,
+               let document = scrollView.documentView,
+               document.frame.width > scrollView.contentView.bounds.width + 1 {
+                return false
+            }
             let localPoint = view.convert(windowPoint, from: nil)
 
             // Extend the hit area vertically by a few points so the cursor

@@ -44,6 +44,8 @@ struct TabModel: Identifiable {
 }
 
 struct TabSelectionView: View {
+    @EnvironmentObject private var vm: DynamicIslandViewModel
+    @Environment(\.layoutDirection) private var layoutDirection
     @ObservedObject var coordinator = DynamicIslandViewCoordinator.shared
     @ObservedObject private var extensionNotchExperienceManager = ExtensionNotchExperienceManager.shared
     @StateObject private var quickShareService = QuickShareService.shared
@@ -121,10 +123,7 @@ struct TabSelectionView: View {
 
                 // Render the tab button
                 TabButton(label: tab.label, icon: tab.icon, selected: isSelected) {
-                    if tab.view == .extensionExperience {
-                        coordinator.selectedExtensionExperienceID = tab.experienceID
-                    }
-                    coordinator.currentView = tab.view
+                    select(tab)
                 }
                 .frame(height: 26)
                 .foregroundStyle(isSelected ? activeAccent : .gray)
@@ -149,6 +148,29 @@ struct TabSelectionView: View {
         .onAppear {
             ensureValidSelection(with: tabs)
         }
+        .onReceive(vm.tabSwipes) { forward in
+            let visibleTabs = tabs
+            guard let current = visibleTabs.firstIndex(where: isSelected) else {
+                ensureValidSelection(with: visibleTabs)
+                return
+            }
+            let step = forward == (layoutDirection == .leftToRight) ? 1 : -1
+            let destination = current + step
+            guard visibleTabs.indices.contains(destination) else { return }
+
+            select(visibleTabs[destination])
+            coordinator.tabSwitchForward = step > 0
+            if Defaults[.enableHaptics] {
+                NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+            }
+        }
+    }
+
+    private func select(_ tab: TabModel) {
+        if tab.view == .extensionExperience {
+            coordinator.selectedExtensionExperienceID = tab.experienceID
+        }
+        coordinator.currentView = tab.view
     }
 
     private var extensionTabsEnabled: Bool {

@@ -35,6 +35,7 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     @Published var dropZoneTargeting: Bool = false
     @Published var dropEvent: Bool = false
     @Published var anyDropZoneTargeting: Bool = false
+    let tabSwipes = PassthroughSubject<Bool, Never>()
     var cancellables: Set<AnyCancellable> = []
 
     /// Teardown hook ContentView registers in `onAppear`; the window-cleanup path

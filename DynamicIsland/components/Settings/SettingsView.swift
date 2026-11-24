@@ -235,7 +235,8 @@ private enum SettingsSearchIndex {
         SettingsSearchEntry(tab: .general, title: "Also keep the display awake", keywords: ["caffeinate", "keep awake", "display sleep", "screen"], highlightID: SettingsTab.general.highlightID(for: "Also keep the display awake")),
         SettingsSearchEntry(tab: .general, title: "Enable gestures", keywords: ["gestures", "trackpad"], highlightID: SettingsTab.general.highlightID(for: "Enable gestures")),
         SettingsSearchEntry(tab: .general, title: "Close gesture", keywords: ["pinch", "swipe"], highlightID: SettingsTab.general.highlightID(for: "Close gesture")),
-        SettingsSearchEntry(tab: .general, title: "Reverse swipe gestures", keywords: ["reverse", "swipe", "media"], highlightID: SettingsTab.general.highlightID(for: "Reverse swipe gestures")),
+        SettingsSearchEntry(tab: .general, title: "Switch tabs with horizontal gestures", keywords: ["tabs", "swipe", "trackpad"], highlightID: SettingsTab.general.highlightID(for: "Horizontal tab gestures")),
+        SettingsSearchEntry(tab: .general, title: "Reverse swipe gestures", keywords: ["reverse", "swipe", "tabs"], highlightID: SettingsTab.general.highlightID(for: "Reverse swipe gestures")),
         SettingsSearchEntry(tab: .general, title: "Reverse scroll gestures", keywords: ["reverse", "scroll", "open", "close"], highlightID: SettingsTab.general.highlightID(for: "Reverse scroll gestures")),
         SettingsSearchEntry(tab: .general, title: "Extend hover area", keywords: ["hover", "cursor"], highlightID: SettingsTab.general.highlightID(for: "Extend hover area")),
         SettingsSearchEntry(tab: .general, title: "Enable haptics", keywords: ["haptic", "feedback"], highlightID: SettingsTab.general.highlightID(for: "Enable haptics")),
@@ -1137,8 +1138,7 @@ struct GeneralSettings: View {
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
     @Default(.showBatteryIndicator) var showBatteryIndicator
     @Default(.showMinimalisticBatteryIndicator) var showMinimalisticBatteryIndicator
-    @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
-    @Default(.musicGestureBehavior) var musicGestureBehavior
+    @Default(.enableHorizontalMusicGestures) var enableHorizontalTabGestures
     @Default(.reverseSwipeGestures) var reverseSwipeGestures
     @Default(.reverseScrollGestures) var reverseScrollGestures
     @Default(.externalDisplayStyle) var externalDisplayStyle
@@ -1351,22 +1351,11 @@ struct GeneralSettings: View {
             .settingsHighlight(id: highlightID("Enable gestures"))
             if enableGestures {
                 Defaults.Toggle(key: .enableHorizontalMusicGestures) {
-                    Text("Media change with horizontal gestures")
+                    Text("Switch tabs with horizontal gestures")
                 }
-                .settingsHighlight(id: highlightID("Horizontal media gestures"))
+                .settingsHighlight(id: highlightID("Horizontal tab gestures"))
 
-                if enableHorizontalMusicGestures {
-                    SettingsSegmentedPicker(
-                        "Gesture skip behavior",
-                        selection: $musicGestureBehavior,
-                        items: Array(MusicSkipBehavior.allCases)
-                    ) { $0.displayName }
-                    .settingsHighlight(id: highlightID("Gesture skip behavior"))
-
-                    Text(musicGestureBehavior.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
+                if enableHorizontalTabGestures {
                     Defaults.Toggle(key: .reverseSwipeGestures) {
                         Text("Reverse swipe gestures")
                     }

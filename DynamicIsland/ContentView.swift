@@ -74,7 +74,7 @@ struct ContentView: View {
     @Default(.enableReminderLiveActivity) var enableReminderLiveActivity
     @Default(.enableTimerFeature) var enableTimerFeature
     @Default(.timerDisplayMode) var timerDisplayMode
-    @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
+    @Default(.enableHorizontalMusicGestures) var enableHorizontalTabGestures
     @Default(.reminderPresentationStyle) var reminderPresentationStyle
     @Default(.timerShowsCountdown) var timerShowsCountdown
     @Default(.timerShowsProgress) var timerShowsProgress
@@ -251,7 +251,6 @@ struct ContentView: View {
     @State private var isHoveringClosedMusicWaveformControl: Bool = false
 
     @State private var gestureProgress: CGFloat = .zero
-    @State private var skipGestureActiveDirection: MusicManager.SkipDirection?
     @State private var isMusicControlWindowVisible = false
     @State private var pendingMusicControlTask: Task<Void, Never>?
     @State private var musicControlHideTask: Task<Void, Never>?
@@ -731,11 +730,8 @@ struct ContentView: View {
                             .panGesture(direction: .down) { translation, phase in
                                 handleDownGesture(translation: translation, phase: phase)
                             }
-                            .panGesture(direction: .left) { translation, phase in
-                                handleSkipGesture(direction: .forward, translation: translation, phase: phase)
-                            }
-                            .panGesture(direction: .right) { translation, phase in
-                                handleSkipGesture(direction: .backward, translation: translation, phase: phase)
+                            .horizontalScrollGesture { forward in
+                                handleTabSwipe(forward: forward)
                             }
                     }
             }
@@ -2647,45 +2643,12 @@ struct ContentView: View {
         }
     }
 
-    private func handleSkipGesture(direction: MusicManager.SkipDirection, translation: CGFloat, phase: NSEvent.Phase) {
-        if phase == .ended {
-            skipGestureActiveDirection = nil
-            return
-        }
+    private func handleTabSwipe(forward: Bool) {
+        guard enableHorizontalTabGestures, vm.notchState == .open,
+              !enableMinimalisticUI, !lockScreenManager.isLocked, !hasAnyActivePopovers(),
+              !vm.isHoveringCalendar, !vm.isScrollGestureActive else { return }
 
-        guard canPerformSkipGesture() else {
-            skipGestureActiveDirection = nil
-            return
-        }
-
-        if skipGestureActiveDirection == nil && translation > Defaults[.gestureSensitivity] {
-            let effectiveDirection: MusicManager.SkipDirection
-            if Defaults[.reverseSwipeGestures] {
-                effectiveDirection = direction == .forward ? .backward : .forward
-            } else {
-                effectiveDirection = direction
-            }
-            skipGestureActiveDirection = effectiveDirection
-
-            if Defaults[.enableHaptics] {
-                triggerHapticIfAllowed()
-            }
-
-            musicManager.handleSkipGesture(direction: effectiveDirection)
-        }
-    }
-
-    private func canPerformSkipGesture() -> Bool {
-        let canSkipInOpenHome = vm.notchState == .open && coordinator.currentView == .home
-        let canSkipInClosedMusic = !Defaults[.openNotchOnHover] && isClosedMusicGestureContext
-
-        return enableHorizontalMusicGestures
-            && (canSkipInOpenHome || canSkipInClosedMusic)
-            && (!musicManager.isPlayerIdle || musicManager.bundleIdentifier != nil)
-            && !lockScreenManager.isLocked
-            && !hasAnyActivePopovers()
-            && !vm.isHoveringCalendar
-            && !vm.isScrollGestureActive
+        vm.tabSwipes.send(forward != Defaults[.reverseSwipeGestures])
     }
 
     private func handleMusicControlPlaybackChange(isPlaying: Bool) {

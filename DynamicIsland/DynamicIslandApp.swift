@@ -167,8 +167,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         installTopMenuItemsIfNeeded()
         AccessibilityPermissionStore.shared.refreshStatus()
-        FullDiskAccessPermissionStore.shared.refreshStatus()
-        ShelfFolderAccessPermissionStore.shared.refreshStatus()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

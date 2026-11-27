@@ -4560,9 +4560,6 @@ struct Shelf: View {
                     Button("Request Screen Recording Access") {
                         hasScreenRecordingAccess = ScreenshotSnippingTool.requestScreenRecordingAccess()
                     }
-                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                        hasScreenRecordingAccess = CGPreflightScreenCaptureAccess()
-                    }
                 }
 
                 Text("Atoll imports new files saved by macOS Screenshot. The Shelf shortcut captures an area without using the clipboard.")
@@ -4613,10 +4610,16 @@ struct Shelf: View {
         }
         .accentColor(.effectiveAccent)
         .navigationTitle("Shelf")
-        .onAppear {
-            fullDiskAccessPermission.refreshStatus()
-            shelfFolderAccessPermission.refreshStatus()
+        .onAppear(perform: refreshPermissions)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissions()
         }
+    }
+
+    private func refreshPermissions() {
+        fullDiskAccessPermission.refreshStatus()
+        shelfFolderAccessPermission.refreshStatus()
+        hasScreenRecordingAccess = CGPreflightScreenCaptureAccess()
     }
 }
 

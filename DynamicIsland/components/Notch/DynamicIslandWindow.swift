@@ -83,6 +83,11 @@ class DynamicIslandWindow: NSPanel, NSDraggingDestination {
         shelfViewModel?.nativeShelfTargeting = false
     }
 
+    func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let vm = shelfViewModel, vm.onShelfFileDrop != nil else { return false }
+        return acceptsShelfDrag(sender, viewModel: vm)
+    }
+
     func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let vm = shelfViewModel else { return false }
         defer { vm.nativeShelfTargeting = false }

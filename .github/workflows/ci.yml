@@ -83,12 +83,28 @@ jobs:
           xcodebuild build \
             -project DynamicIsland.xcodeproj \
             -scheme DynamicIsland \
+            -configuration Debug \
             -destination "platform=macOS" \
+            -derivedDataPath "$RUNNER_TEMP/atoll-build" \
             -resultBundlePath BuildResults.xcresult \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_INJECT_BASE_ENTITLEMENTS=YES
+
+      - name: Package Atoll
+        run: |
+          APP="$RUNNER_TEMP/atoll-build/Build/Products/Debug/Atoll.app"
+          test -x "$APP/Contents/MacOS/Atoll"
+          test -f "$APP/Contents/Resources/codex-permission-hook.txt"
+          ditto -c -k --keepParent "$APP" "$RUNNER_TEMP/Atoll.zip"
+
+      - name: Upload Atoll app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Atoll-${{ matrix.macos_version }}
+          path: ${{ runner.temp }}/Atoll.zip
+          if-no-files-found: error
 
       - name: Surface Failure Diagnostics
         if: failure()

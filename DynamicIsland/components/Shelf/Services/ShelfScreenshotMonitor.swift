@@ -3,7 +3,7 @@ import Combine
 import CoreServices
 import Defaults
 import SwiftUI
-import UniformTypeIdentifiers
+import ImageIO
 
 @MainActor
 final class ShelfScreenshotMonitor {
@@ -95,7 +95,7 @@ final class ShelfScreenshotMonitor {
         let folder = location.map { URL(fileURLWithPath: NSString(string: $0).expandingTildeInPath) }
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
         let keys: Set<URLResourceKey> = [
-            .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey, .contentTypeKey
+            .creationDateKey, .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey
         ]
         guard let contents = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys),
                                                                 options: .skipsHiddenFiles) else { return [] }
@@ -105,10 +105,16 @@ final class ShelfScreenshotMonitor {
                   values.isRegularFile == true, values.isSymbolicLink != true,
                   let created = values.creationDate, created >= cutoff,
                   let modified = values.contentModificationDate, modified <= settledAt,
-                  let type = values.contentType, type.conforms(to: .image) || type.conforms(to: .pdf),
-                  isScreenCapture(url) else { return nil }
+                  isScreenCapture(url),
+                  isStillImage(url) else { return nil }
             return (url, created)
         }.sorted { $0.1 < $1.1 }
+    }
+
+    private nonisolated static func isStillImage(_ url: URL) -> Bool {
+        if url.pathExtension.lowercased() == "pdf" { return true }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return false }
+        return CGImageSourceGetType(source) != nil
     }
 
     private nonisolated static func isScreenCapture(_ url: URL) -> Bool {

@@ -1316,7 +1316,7 @@ struct ContentView: View {
                           codexApprovals.decide(decision, for: approval)
                       }
                       .id(approval.id)
-                      .transition(reduceMotion ? .opacity : .blurReplace)
+                      .transition(reduceMotion ? .opacity : AnyTransition(BlurReplaceTransition(configuration: .downUp)))
                   } else if vm.notchState == .open {
                       Group {
                           switch coordinator.currentView {

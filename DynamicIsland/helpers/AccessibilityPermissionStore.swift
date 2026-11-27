@@ -46,17 +46,29 @@ final class AccessibilityPermissionStore: ObservableObject {
 #if canImport(ApplicationServices)
         let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options: CFDictionary = [promptKey: true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+        if !AXIsProcessTrustedWithOptions(options) {
+            openSystemSettings()
+        }
 #endif
         beginPollingForStatusChanges()
     }
 
     func openSystemSettings() {
-#if os(macOS)
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
+        Self.openPrivacyPane("Accessibility")
+    }
+
+    func requestInputMonitoring() {
+        guard !CGPreflightListenEventAccess() else { return }
+        if !CGRequestListenEventAccess() {
+            Self.openPrivacyPane("ListenEvent")
         }
-#endif
+    }
+
+    static func openPrivacyPane(_ pane: String) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_\(pane)") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     private func beginPollingForStatusChanges() {

@@ -122,7 +122,7 @@ private struct ScrollMonitor: NSViewRepresentable {
             lastEventTimestamp = event.timestamp
             guard isCursorNearObservedView(using: event) else { return }
 
-            if event.phase == .ended || event.momentumPhase == .ended {
+            if event.phase == .ended || event.phase == .cancelled || event.momentumPhase == .ended {
                 if active {
                     action(accumulated.magnitude, .ended)
                 } else {
@@ -144,6 +144,11 @@ private struct ScrollMonitor: NSViewRepresentable {
             // very light flick that only used to reach the threshold once momentum
             // carried it now needs a slightly longer swipe.
             guard event.momentumPhase.isEmpty else { return }
+
+            if !direction.isHorizontal, event.hasPreciseScrollingDeltas,
+               abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) {
+                return
+            }
 
             let s = direction.signed(deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY)
             guard s.magnitude > noiseThreshold else { return }
@@ -177,6 +182,87 @@ private struct ScrollMonitor: NSViewRepresentable {
             // from the sides of the notch.
             let hitArea = view.bounds.insetBy(dx: 0, dy: -verticalEdgeInset)
             return hitArea.contains(localPoint)
+        }
+    }
+}
+
+/// Trackpad scroll phases let the notch distinguish a swipe from momentum or a mouse wheel.
+struct TabSwipeMonitor: NSViewRepresentable {
+    let threshold: CGFloat
+    let isEnabled: () -> Bool
+    let onSwipe: (Bool) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        let coordinator = context.coordinator
+        coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak view, weak coordinator] event in
+            guard let view, let coordinator else { return event }
+            guard event.window === view.window else { return event }
+            return coordinator.handle(event, in: view, screenLocation: nil) ? nil : event
+        }
+        coordinator.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak view, weak coordinator] event in
+            guard let view, let coordinator else { return }
+            _ = coordinator.handle(event, in: view, screenLocation: NSEvent.mouseLocation)
+        }
+        return view
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(configuration: self) }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.configuration = self
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        if let monitor = coordinator.monitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = coordinator.globalMonitor { NSEvent.removeMonitor(monitor) }
+        coordinator.monitor = nil
+        coordinator.globalMonitor = nil
+    }
+
+    @MainActor final class Coordinator {
+        var configuration: TabSwipeMonitor
+        var monitor: Any?
+        var globalMonitor: Any?
+        private enum Axis { case undecided, horizontal, vertical }
+        private var axis = Axis.undecided
+        private var distance = CGPoint.zero
+        private var tracking = false
+        private var switched = false
+
+        init(configuration: TabSwipeMonitor) { self.configuration = configuration }
+
+        func handle(_ event: NSEvent, in view: NSView, screenLocation: NSPoint?) -> Bool {
+            guard let window = view.window, window.isVisible, window.alphaValue > 0,
+                  event.hasPreciseScrollingDeltas else { return false }
+            if !event.momentumPhase.isEmpty { return axis == .horizontal }
+            if event.phase == .began || event.phase == .mayBegin {
+                let location = screenLocation.map { window.convertPoint(fromScreen: $0) } ?? event.locationInWindow
+                let hitArea = view.bounds.insetBy(dx: 0, dy: -4)
+                tracking = configuration.isEnabled() && hitArea.contains(view.convert(location, from: nil))
+                axis = .undecided
+                distance = .zero
+                switched = false
+            }
+            guard tracking else { return false }
+            if event.phase == .ended || event.phase == .cancelled {
+                tracking = false
+                return axis == .horizontal
+            }
+            guard event.phase == .began || event.phase == .changed else { return false }
+
+            distance.x += event.scrollingDeltaX
+            distance.y += event.scrollingDeltaY
+            if axis == .undecided, max(abs(distance.x), abs(distance.y)) >= 8 {
+                axis = abs(distance.x) > abs(distance.y) * 1.25 ? .horizontal : .vertical
+            }
+            guard axis == .horizontal else { return false }
+            if !switched, abs(distance.x) >= configuration.threshold, configuration.isEnabled() {
+                switched = true
+                let fingerMovedLeft = (event.isDirectionInvertedFromDevice ? distance.x : -distance.x) < 0
+                configuration.onSwipe(fingerMovedLeft)
+            }
+            return true
         }
     }
 }

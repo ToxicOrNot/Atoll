@@ -22,6 +22,7 @@
 
 import SwiftUI
 import AppKit
+import Defaults
 
 private struct ShelfBackgroundClickCatcher: NSViewRepresentable {
     let onClick: () -> Void
@@ -56,6 +57,8 @@ struct ShelfView: View {
     @StateObject var selection = ShelfSelectionModel.shared
     @StateObject private var quickLookService = QuickLookService()
     @State private var autoCloseToken = UUID()
+    @Default(.horizontalSwipeAction) private var horizontalSwipeAction
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewportSize: CGSize = .zero
     private let spacing: CGFloat = 8
 
@@ -162,45 +165,54 @@ struct ShelfView: View {
                         .fontWeight(.medium)
                 }
             } else {
-                ScrollView(.horizontal) {
-                    HStack(spacing: spacing) {
-                        ForEach(tvm.items) { item in
-                            ShelfItemView(item: item)
-                                .environmentObject(quickLookService)
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        HStack(spacing: spacing) {
+                            ForEach(tvm.items) { item in
+                                ShelfItemView(item: item)
+                                    .environmentObject(quickLookService)
+                                    .transition(reduceMotion ? .opacity : .scale(scale: 0.85).combined(with: .opacity))
+                            }
+                        }
+                        // Stretch the content to at least the viewport so the
+                        // marquee overlay also covers the gap right of the last item
+                        // — that gap is where a rubber-band selection usually starts.
+                        .frame(
+                            minWidth: viewportSize.width,
+                            minHeight: viewportSize.height,
+                            alignment: .leading
+                        )
+                        .overlay {
+                            ShelfMarqueeSelectionView(
+                                onBackgroundClick: {
+                                    guard !selection.isDragging else { return }
+                                    selection.clear()
+                                },
+                                onActiveChange: { active in
+                                    vm.setAutoCloseSuppression(active, token: autoCloseToken)
+                                }
+                            )
                         }
                     }
-                    // Stretch the content to at least the viewport so the
-                    // marquee overlay also covers the gap right of the last item
-                    // — that gap is where a rubber-band selection usually starts.
-                    .frame(
-                        minWidth: viewportSize.width,
-                        minHeight: viewportSize.height,
-                        alignment: .leading
+                    .padding(-spacing)
+                    .scrollIndicators(horizontalSwipeAction == .tabs ? .visible : .never, axes: .horizontal)
+                    // Measures the ScrollView itself (the viewport), not its
+                    // content, so this only fires when the panel resizes.
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: ShelfViewportSizeKey.self, value: proxy.size)
+                        }
                     )
-                    .overlay {
-                        ShelfMarqueeSelectionView(
-                            onBackgroundClick: {
-                                guard !selection.isDragging else { return }
-                                selection.clear()
-                            },
-                            onActiveChange: { active in
-                                vm.setAutoCloseSuppression(active, token: autoCloseToken)
-                            }
-                        )
+                    .onPreferenceChange(ShelfViewportSizeKey.self) { viewportSize = $0 }
+                    .onDrop(of: [.fileURL, .url, .utf8PlainText, .plainText, .data], isTargeted: $vm.dragDetectorTargeting) { providers in
+                        handleDrop(providers: providers)
                     }
-                }
-                .padding(-spacing)
-                .scrollIndicators(.never)
-                // Measures the ScrollView itself (the viewport), not its
-                // content, so this only fires when the panel resizes.
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(key: ShelfViewportSizeKey.self, value: proxy.size)
+                    .onChange(of: tvm.latestScreenshotID, initial: true) { _, id in
+                        guard let id else { return }
+                        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+                            proxy.scrollTo(id, anchor: .trailing)
+                        }
                     }
-                )
-                .onPreferenceChange(ShelfViewportSizeKey.self) { viewportSize = $0 }
-                .onDrop(of: [.fileURL, .url, .utf8PlainText, .plainText, .data], isTargeted: $vm.dragDetectorTargeting) { providers in
-                    handleDrop(providers: providers)
                 }
             }
         }

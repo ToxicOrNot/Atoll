@@ -21,8 +21,10 @@
  */
 
 import Cocoa
+import Defaults
 
-class DynamicIslandWindow: NSPanel {
+class DynamicIslandWindow: NSPanel, NSDraggingDestination {
+    weak var shelfViewModel: DynamicIslandViewModel?
     static let pinnedCollectionBehavior: NSWindow.CollectionBehavior = [
         .fullScreenAuxiliary,
         .canJoinAllSpaces,
@@ -60,6 +62,62 @@ class DynamicIslandWindow: NSPanel {
         ScreenCaptureVisibilityManager.shared.register(self, scope: .entireInterface)
     }
     
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let vm = shelfViewModel else { return [] }
+        let accepts = acceptsShelfDrag(sender, viewModel: vm)
+        if vm.nativeShelfTargeting != accepts {
+            vm.nativeShelfTargeting = accepts
+        }
+        return accepts ? .copy : []
+    }
+
+    func draggingExited(_ sender: NSDraggingInfo?) {
+        shelfViewModel?.nativeShelfTargeting = false
+    }
+
+    func draggingEnded(_ sender: NSDraggingInfo) {
+        shelfViewModel?.nativeShelfTargeting = false
+    }
+
+    func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let vm = shelfViewModel, vm.onShelfFileDrop != nil else { return false }
+        return acceptsShelfDrag(sender, viewModel: vm)
+    }
+
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let vm = shelfViewModel else { return false }
+        defer { vm.nativeShelfTargeting = false }
+        guard acceptsShelfDrag(sender, viewModel: vm) else { return false }
+        let objects = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) ?? []
+        let urls = objects.compactMap { $0 as? URL }.filter(\.isFileURL)
+        guard !urls.isEmpty else { return false }
+        return vm.onShelfFileDrop?(urls) ?? false
+    }
+
+    private func acceptsShelfDrag(_ sender: NSDraggingInfo, viewModel: DynamicIslandViewModel) -> Bool {
+        guard Defaults[.dynamicShelf], Defaults[.expandedDragDetection], !Defaults[.enableMinimalisticUI],
+              !LockScreenManager.shared.isLocked, CodexApprovalManager.shared.request(for: viewModel) == nil,
+              !ShelfSelectionModel.shared.isDragging,
+              sender.draggingSourceOperationMask.contains(.copy),
+              sender.draggingPasteboard.availableType(from: [.fileURL]) != nil,
+              let displayFrame = screen?.frame ?? getScreenFrame(viewModel.screen) else { return false }
+
+        let location = convertPoint(toScreen: sender.draggingLocation)
+        let size = expandedShelfDropArea(closedNotchSize: viewModel.closedNotchSize)
+        return CGRect(
+            x: displayFrame.midX - size.width / 2,
+            y: displayFrame.maxY - size.height,
+            width: size.width,
+            height: size.height
+        ).contains(location)
+    }
+
     override var canBecomeKey: Bool {
         true
     }

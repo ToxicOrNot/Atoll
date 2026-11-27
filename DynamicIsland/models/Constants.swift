@@ -981,6 +981,18 @@ enum LockScreenLiveActivityIconStyle: String, Defaults.Serializable {
     var showsFingerprint: Bool { self == .fingerprint || self == .both }
 }
 
+enum HorizontalSwipeAction: String, Defaults.Serializable, CaseIterable {
+    case media
+    case tabs
+
+    var displayName: String {
+        switch self {
+        case .media: String(localized: "Music")
+        case .tabs: String(localized: "Tabs")
+        }
+    }
+}
+
 extension Defaults.Keys {
         // MARK: General
     static let updateChannel = Key<UpdateChannel>("updateChannel", default: .stable)
@@ -1054,6 +1066,8 @@ extension Defaults.Keys {
     static let enableGestures = Key<Bool>("enableGestures", default: true)
     static let closeGestureEnabled = Key<Bool>("closeGestureEnabled", default: true)
     static let gestureSensitivity = Key<CGFloat>("gestureSensitivity", default: 200.0)
+    static let codexNotchApprovals = Key<Bool>("codexNotchApprovals", default: false)
+    static let horizontalSwipeAction = Key<HorizontalSwipeAction>("horizontalSwipeAction", default: .tabs)
     static let enableHorizontalMusicGestures = Key<Bool>("enableHorizontalMusicGestures", default: true)
     static let musicGestureBehavior = Key<MusicSkipBehavior>("musicGestureBehavior", default: .track)
     static let reverseSwipeGestures = Key<Bool>("reverseSwipeGestures", default: false)
@@ -1224,6 +1238,7 @@ extension Defaults.Keys {
         // volume, which reads as data loss.
         static let allowMoveOnDrag = Key<Bool>("allowMoveOnDrag", default: false)
         static let autoRemoveShelfItems = Key<Bool>("autoRemoveShelfItems", default: false)
+        static let autoImportScreenshotsToShelf = Key<Bool>("autoImportScreenshotsToShelf", default: false)
         static let expandedDragDetection = Key<Bool>("expandedDragDetection", default: true)
     
         // MARK: Calendar

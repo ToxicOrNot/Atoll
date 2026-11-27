@@ -31,6 +31,9 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     @Published var contentType: ContentType = .normal
     @Published private(set) var notchState: NotchState = .closed
 
+    @Published var shelfActivationTargeting = false
+    @Published var nativeShelfTargeting = false
+    var onShelfFileDrop: (([URL]) -> Bool)?
     @Published var dragDetectorTargeting: Bool = false
     @Published var dropZoneTargeting: Bool = false
     @Published var dropEvent: Bool = false
@@ -161,10 +164,9 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
         notchSize = getClosedNotchSize(screen: screen)
         closedNotchSize = notchSize
 
-        Publishers.CombineLatest($dropZoneTargeting, $dragDetectorTargeting)
-            .map { value1, value2 in
-                value1 || value2
-            }
+        Publishers.CombineLatest4($dropZoneTargeting, $dragDetectorTargeting, $shelfActivationTargeting, $nativeShelfTargeting)
+            .map { $0 || $1 || $2 || $3 }
+            .removeDuplicates()
             .assign(to: \.anyDropZoneTargeting, on: self)
             .store(in: &cancellables)
         
@@ -393,6 +395,10 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     }
 
     func open() {
+        open(focusRecentClipboard: true)
+    }
+
+    func open(focusRecentClipboard: Bool) {
         let targetSize = calculateDynamicNotchSize()
 
         let applyWindowResize: () -> Void = {
@@ -415,7 +421,7 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
 
         // Force music information update when notch is opened
         MusicManager.shared.forceUpdate()
-        focusClipboardTabIfNeeded()
+        if focusRecentClipboard { focusClipboardTabIfNeeded() }
     }
     
     private func calculateDynamicNotchSize() -> CGSize {

@@ -33,11 +33,30 @@ final class ShelfPersistenceService {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    private init() {
+    private static var directory: URL {
         let fm = FileManager.default
         let support = try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        let dir = (support ?? fm.temporaryDirectory).appendingPathComponent("DynamicIsland", isDirectory: true).appendingPathComponent("Shelf", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return (support ?? fm.temporaryDirectory)
+            .appendingPathComponent("DynamicIsland", isDirectory: true)
+            .appendingPathComponent("Shelf", isDirectory: true)
+    }
+
+    static var capturesDirectory: URL { directory.appendingPathComponent("Captures", isDirectory: true) }
+
+    @discardableResult
+    static func removeManagedCapture(at url: URL) -> Bool {
+        let parent = url.deletingLastPathComponent()
+        guard UUID(uuidString: parent.lastPathComponent) != nil,
+              parent.deletingLastPathComponent().standardizedFileURL.path == capturesDirectory.standardizedFileURL.path else {
+            return false
+        }
+        try? FileManager.default.removeItem(at: parent)
+        return true
+    }
+
+    private init() {
+        let dir = Self.directory
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("items.json")
         encoder.outputFormatting = [.prettyPrinted]
         decoder.dateDecodingStrategy = .iso8601

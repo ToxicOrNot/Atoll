@@ -1,0 +1,46 @@
+#!/bin/sh
+
+# A missing or busy Atoll leaves the normal Codex prompt in charge.
+set -u
+umask 077
+tmpdir=$(/usr/bin/getconf DARWIN_USER_TEMP_DIR) || exit 0
+root="${tmpdir%/}/atoll-codex-approvals"
+[ -n "$tmpdir" ] || exit 0
+/bin/mkdir -m 700 "$root" 2>/dev/null || [ -d "$root" ] || exit 0
+[ ! -L "$root" ] || exit 0
+[ "$(/usr/bin/stat -f '%u:%Lp' "$root")" = "$(/usr/bin/id -u):700" ] || exit 0
+
+request=$(/usr/bin/mktemp -d "$root/request.XXXXXXXX") || exit 0
+trap '/bin/rm -rf "$request"' EXIT
+trap 'exit 0' HUP INT TERM
+# Read one bounded request before publishing it. The app only reads request.json.
+# Oversized requests fall back to Codex's native approval.
+if ! /usr/bin/head -c 262145 > "$request/input"; then exit 0; fi
+[ "$(/usr/bin/stat -f %z "$request/input")" -le 262144 ] || exit 0
+/bin/mv "$request/input" "$request/request.json" || exit 0
+
+# Atoll acknowledges the request before it is shown or queued.
+attempt=0
+while [ ! -f "$request/received" ] && [ "$attempt" -lt 15 ]; do
+    /bin/sleep 0.2
+    attempt=$((attempt + 1))
+done
+[ -f "$request/received" ] || exit 0
+
+attempt=0
+while [ "$attempt" -lt 450 ]; do
+    if [ -f "$request/decision" ]; then
+        decision=$(/bin/cat "$request/decision")
+        case "$decision" in
+            allow)
+                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}'
+                ;;
+            deny)
+                printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Declined in Atoll."}}}'
+                ;;
+        esac
+        exit 0
+    fi
+    /bin/sleep 0.2
+    attempt=$((attempt + 1))
+done

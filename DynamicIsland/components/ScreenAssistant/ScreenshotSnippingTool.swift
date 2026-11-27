@@ -20,183 +20,88 @@ import AppKit
 import SwiftUI
 import Foundation
 
-// MARK: - Simplified Screenshot Tool (Based on ScreenshotApp Research)
-class ScreenshotSnippingTool: NSObject, ObservableObject {
+@MainActor
+final class ScreenshotSnippingTool: ObservableObject {
     static let shared = ScreenshotSnippingTool()
-    
-    @Published var isSnipping = false
-    private var completion: ((URL) -> Void)?
-    
-    // MARK: - Screenshot Types (Based on ScreenshotApp)
+
+    @Published private(set) var isSnipping = false
+    private var process: Process?
+
     enum ScreenshotType {
         case full
         case window
         case area
-        
+
         var processArguments: [String] {
             switch self {
-            case .full:
-                return ["-c"] // -c = clipboard
-            case .window:
-                return ["-cw"] // -c = clipboard, -w = window selection
-            case .area:
-                return ["-cs"] // -c = clipboard, -s = area selection
+            case .full: ["-x", "-m"]
+            case .window: ["-x", "-i", "-w"]
+            case .area: ["-x", "-i", "-s"]
             }
         }
-        
+
         var displayName: String {
             switch self {
-            case .full: return "Full Screen"
-            case .window: return "Window"
-            case .area: return "Area"
+            case .full: "Full Screen"
+            case .window: "Window"
+            case .area: "Area"
             }
         }
-        
+
         var iconName: String {
             switch self {
-            case .full: return "rectangle.dashed"
-            case .window: return "macwindow"
-            case .area: return "viewfinder.rectangular"
+            case .full: "rectangle.dashed"
+            case .window: "macwindow"
+            case .area: "viewfinder.rectangular"
             }
         }
     }
-    
-    enum ScreenshotError: Error {
-        case captureFailed
-        case noImageInPasteboard
-        case saveFailed
+
+    static func requestScreenRecordingAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() { return true }
+        AccessibilityPermissionStore.openPrivacyPane("ScreenCapture")
+        return false
     }
-    
-    override init() {
-        super.init()
-    }
-    
-    // MARK: - Enhanced API (Based on ScreenshotApp Implementation)
-    func startSnipping(type: ScreenshotType = .area, completion: @escaping (URL) -> Void) {
-        guard !isSnipping else { return }
-        
-        print("🖼️ ScreenshotTool: Starting \(type.displayName.lowercased()) screenshot using screencapture tool")
-        self.completion = completion
-        isSnipping = true
-        
-        // Use the same approach as ScreenshotApp - direct screencapture command
-        takeScreenshot(type: type)
-    }
-    
-    // MARK: - Convenience Methods for Different Types
-    func startAreaScreenshot(completion: @escaping (URL) -> Void) {
-        startSnipping(type: .area, completion: completion)
-    }
-    
-    func startFullScreenshot(completion: @escaping (URL) -> Void) {
-        startSnipping(type: .full, completion: completion)
-    }
-    
-    func startWindowScreenshot(completion: @escaping (URL) -> Void) {
-        startSnipping(type: .window, completion: completion)
-    }
-    
-    // MARK: - ScreenshotApp-Style Implementation
-    private func takeScreenshot(type: ScreenshotType) {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        task.arguments = type.processArguments
-        
+
+    @discardableResult
+    func startSnipping(
+        type: ScreenshotType = .area,
+        destination: URL? = nil,
+        completion: @escaping (URL) -> Void
+    ) -> Bool {
+        guard !isSnipping, Self.requestScreenRecordingAccess() else { return false }
+        let url = destination ?? ScreenAssistantManager.screenshotDataDirectory
+            .appendingPathComponent("screenshot_\(UUID().uuidString).png")
+        let directory = url.deletingLastPathComponent()
+        let capture = Process()
+        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        capture.arguments = type.processArguments + ["-t", "png", url.path]
+        capture.terminationHandler = { [weak self] finished in
+            Task { @MainActor in
+                guard let self, self.process === finished else { return }
+                self.process = nil
+                self.isSnipping = false
+                if finished.terminationStatus == 0, FileManager.default.fileExists(atPath: url.path) {
+                    completion(url)
+                } else if destination != nil {
+                    try? FileManager.default.removeItem(at: directory)
+                } else {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
+
         do {
-            print("📸 ScreenshotTool: Running screencapture \(type.processArguments.joined(separator: " ")) command")
-            try task.run()
-            task.waitUntilExit()
-            
-            // Process completed - check if successful
-            if task.terminationStatus == 0 {
-                print("✅ ScreenshotTool: screencapture completed successfully")
-                getImageFromPasteboard()
-            } else {
-                print("❌ ScreenshotTool: screencapture failed with status: \(task.terminationStatus)")
-                finishSnipping()
-            }
-            
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            try capture.run()
+            process = capture
+            isSnipping = true
+            return true
         } catch {
-            print("❌ ScreenshotTool: Failed to run screencapture: \(error)")
-            finishSnipping()
+            if destination != nil { try? FileManager.default.removeItem(at: directory) }
+            NSLog("Screen capture could not start: %@", error.localizedDescription)
+            return false
         }
-    }
-    
-    // MARK: - Pasteboard Integration (ScreenshotApp Pattern)
-    private func getImageFromPasteboard() {
-        print("� ScreenshotTool: Checking pasteboard for screenshot")
-        
-        guard NSPasteboard.general.canReadItem(withDataConformingToTypes: NSImage.imageTypes) else {
-            print("❌ ScreenshotTool: No image data in pasteboard")
-            finishSnipping()
-            return
-        }
-        
-        guard let image = NSImage(pasteboard: NSPasteboard.general) else {
-            print("❌ ScreenshotTool: Failed to create NSImage from pasteboard")
-            finishSnipping()
-            return
-        }
-        
-        print("✅ ScreenshotTool: Got image from pasteboard: \(image.size)")
-        saveImageAndComplete(image: image)
-    }
-    
-    // MARK: - Image Saving
-    private func saveImageAndComplete(image: NSImage) {
-        let filename = "screenshot_\(Int(Date().timeIntervalSince1970)).png"
-        let screenshotDir = ScreenAssistantManager.screenshotDataDirectory
-        
-        // Ensure directory exists
-        if !FileManager.default.fileExists(atPath: screenshotDir.path) {
-            try? FileManager.default.createDirectory(at: screenshotDir, withIntermediateDirectories: true)
-        }
-        
-        let screenshotURL = screenshotDir.appendingPathComponent(filename)
-        
-        // Convert NSImage to PNG data
-        guard let imageData = image.tiffRepresentation,
-              let bitmapRep = NSBitmapImageRep(data: imageData),
-              let pngData = bitmapRep.representation(using: NSBitmapImageRep.FileType.png, properties: [:]) else {
-            print("❌ ScreenshotTool: Failed to convert image to PNG")
-            finishSnipping()
-            return
-        }
-        
-        do {
-            try pngData.write(to: screenshotURL)
-            print("✅ ScreenshotTool: Screenshot saved to: \(screenshotURL.path)")
-            
-            // Execute completion callback
-            let callback = self.completion
-            self.completion = nil
-            finishSnipping()
-            
-            // Call completion on main thread
-            DispatchQueue.main.async {
-                callback?(screenshotURL)
-            }
-            
-        } catch {
-            print("❌ ScreenshotTool: Failed to save image: \(error)")
-            finishSnipping()
-        }
-    }
-    
-    // MARK: - State Management
-    private func finishSnipping() {
-        print("🔄 ScreenshotTool: Finishing snipping process")
-        
-        DispatchQueue.main.async {
-            self.isSnipping = false
-            self.completion = nil
-            print("✅ ScreenshotTool: Snipping process completed")
-        }
-    }
-    
-    func cancelSnipping() {
-        print("❌ ScreenshotTool: Snipping cancelled")
-        finishSnipping()
     }
 }
-

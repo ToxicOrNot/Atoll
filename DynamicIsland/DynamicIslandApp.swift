@@ -120,6 +120,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let systemTimerBridge = SystemTimerBridge.shared
     let extensionXPCServiceHost = ExtensionXPCServiceHost.shared
     let extensionRPCServer = ExtensionRPCServer.shared
+    private weak var notchOpenedForCodex: DynamicIslandViewModel?
+    private var shelfScreenshotMonitor: ShelfScreenshotMonitor?
     var closeNotchWorkItem: DispatchWorkItem?
     private var previousScreens: [NSScreen]?
     private var onboardingWindowController: NSWindowController?
@@ -164,6 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         installTopMenuItemsIfNeeded()
+        AccessibilityPermissionStore.shared.refreshStatus()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -300,6 +303,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.removeObserver(self)
         extensionXPCServiceHost.stop()
         extensionRPCServer.stop()
+        shelfScreenshotMonitor?.stop()
+        CodexApprovalManager.shared.stop()
         networkConnectivityManager.stopMonitoring()
         
         // Stop AudioTap capture
@@ -422,6 +427,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
 
+        window.shelfViewModel = viewModel
         window.animationBehavior = .none
         // collectionBehavior is configured in DynamicIslandWindow.init
 
@@ -432,6 +438,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 //.moveToSky()
         )
         
+        // A window-level destination can see Finder drags in the transparent part
+        // of the panel. SwiftUI's visible Shelf and share targets keep their own drops.
+        window.registerForDraggedTypes([.fileURL])
         window.orderFrontRegardless()
         NotchSpaceManager.shared.notchSpace.windows.insert(window)
         //SkyLightOperator.shared.delegateWindow(window)
@@ -477,6 +486,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func calculateRequiredNotchSize() -> CGSize {
+        if CodexApprovalManager.shared.hasPendingRequests {
+            let minimum = CodexApprovalManager.minimumNotchSize
+            return addShadowPadding(
+                to: CGSize(width: max(openNotchSize.width, minimum.width), height: max(openNotchSize.height, minimum.height)),
+                isMinimalistic: Defaults[.enableMinimalisticUI]
+            )
+        }
         if NetworkConnectivityHUDMetrics.isPresented(
             state: networkConnectivityManager.hudState,
             notchState: vm.notchState,
@@ -640,6 +656,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             adjusted.height += notchTopScreenBleed(for: screen.localizedName)
         }
+        if Defaults[.dynamicShelf], Defaults[.expandedDragDetection], !Defaults[.enableMinimalisticUI] {
+            let area = expandedShelfDropArea(closedNotchSize: getClosedNotchSize(screen: screen.localizedName))
+            let bleed = notchTopScreenBleed(for: screen.localizedName)
+            adjusted.width = max(adjusted.width, area.width)
+            adjusted.height = max(adjusted.height, area.height + bleed)
+        }
         return adjusted
     }
 
@@ -708,6 +730,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LockScreenManager.shared.configure(viewModel: vm)
         extensionXPCServiceHost.start()
         extensionRPCServer.start()
+        if !AppRuntimeEnvironment.isUITesting {
+            shelfScreenshotMonitor = ShelfScreenshotMonitor { [weak self] in
+                self?.showScreenshotInShelf()
+            }
+            CodexApprovalManager.shared.start(chooseTarget: { [weak self] in
+                self?.showCodexApproval()
+            }, onDismiss: { [weak self] in
+                self?.finishCodexApproval()
+            })
+        }
         
         // Migrate legacy progress bar settings
         Defaults.Keys.migrateProgressBarStyle()
@@ -860,6 +892,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Defaults.publisher(.showDiskGraph, options: []).sink { [weak self] _ in
             self?.debouncedUpdateWindowSize()
         }.store(in: &cancellables)
+
+        Publishers.Merge3(
+            Defaults.publisher(.dynamicShelf, options: []).map { _ in () },
+            Defaults.publisher(.expandedDragDetection, options: []).map { _ in () },
+            Defaults.publisher(.enableMinimalisticUI, options: []).map { _ in () }
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] _ in self?.debouncedUpdateWindowSize() }
+        .store(in: &cancellables)
 
         Defaults.publisher(.openNotchWidth, options: []).sink { [weak self] _ in
             self?.debouncedUpdateWindowSize()
@@ -1198,6 +1239,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         openDevTools.target = self
 
+        let requestInputMonitoring = NSMenuItem(
+            title: String(localized: "Request Input Monitoring"),
+            action: #selector(requestInputMonitoringAccess),
+            keyEquivalent: ""
+        )
+        requestInputMonitoring.target = self
+
+        permissionsSubmenu.addItem(requestInputMonitoring)
+        permissionsSubmenu.addItem(NSMenuItem.separator())
         permissionsSubmenu.addItem(requestFullDisk)
         permissionsSubmenu.addItem(openFullDisk)
         permissionsSubmenu.addItem(NSMenuItem.separator())
@@ -1276,6 +1326,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openAccessibilitySettings() {
         AccessibilityPermissionStore.shared.openSystemSettings()
+    }
+
+    @objc private func requestInputMonitoringAccess() {
+        AccessibilityPermissionStore.shared.requestInputMonitoring()
     }
 
     @objc private func requestFullDiskAccess() {
@@ -1382,6 +1436,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func preferredNotchViewModel() -> DynamicIslandViewModel? {
+        guard !windowsHiddenForLock, !LockScreenManager.shared.isLocked else { return nil }
+        if Defaults[.showOnAllDisplays] {
+            let point = NSEvent.mouseLocation
+            let mouseScreen = NSScreen.screens.first { $0.frame.contains(point) }
+            return mouseScreen.flatMap { viewModels[$0] }
+                ?? NSScreen.main.flatMap { viewModels[$0] }
+                ?? viewModels.values.first
+        }
+        guard let window, window.isVisible, window.alphaValue > 0 else { return nil }
+        return vm
+    }
+
+    @MainActor
+    private func showCodexApproval() -> DynamicIslandViewModel? {
+        guard let target = preferredNotchViewModel(), !target.anyDropZoneTargeting,
+              !ShelfSelectionModel.shared.isDragging else { return nil }
+        cancelPendingNotchAutoClose()
+        if target.notchState == .closed {
+            notchOpenedForCodex = target
+            withAnimation(target.animation) { target.open(focusRecentClipboard: false) }
+        }
+        updateWindowSizeIfNeeded()
+        return target
+    }
+
+    @MainActor
+    private func finishCodexApproval() {
+        if let target = notchOpenedForCodex, target.notchState == .open,
+           !target.isMouseHovering(), !target.isAutoCloseSuppressed {
+            withAnimation(target.animation) { target.close() }
+        }
+        notchOpenedForCodex = nil
+        updateWindowSizeIfNeeded()
+    }
+
+    @MainActor
+    private func showScreenshotInShelf() {
+        guard !CodexApprovalManager.shared.hasPendingRequests,
+              let target = preferredNotchViewModel(), !target.anyDropZoneTargeting,
+              !ShelfSelectionModel.shared.isDragging else { return }
+        let wasClosed = target.notchState == .closed
+        guard wasClosed || coordinator.currentView == .shelf else { return }
+        if wasClosed {
+            cancelPendingNotchAutoClose()
+            withAnimation(target.animation) {
+                coordinator.currentView = .shelf
+                target.open(focusRecentClipboard: false)
+            }
+            let work = DispatchWorkItem { [weak self, weak target] in
+                guard let self, let target, self.coordinator.currentView == .shelf,
+                      target.notchState == .open, !target.isMouseHovering(), !target.anyDropZoneTargeting,
+                      !target.isAutoCloseSuppressed, !ShelfSelectionModel.shared.isDragging else { return }
+                target.close()
+            }
+            closeNotchWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4, execute: work)
         }
     }
 
@@ -1499,6 +1614,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     TerminalManager.shared.refreshTerminalAppearanceIfNeeded()
                 }
             }
+        }
+
+        KeyboardShortcuts.onKeyUp(for: .captureAreaToShelf) { [weak self] in
+            guard Defaults[.enableShortcuts] else { return }
+            self?.shelfScreenshotMonitor?.captureArea()
         }
 
         KeyboardShortcuts.onKeyDown(for: .screenAssistantPanel) { [weak self] in

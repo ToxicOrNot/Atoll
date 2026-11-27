@@ -118,6 +118,16 @@ class DynamicIslandViewCoordinator: ObservableObject {
         }
     }
     
+    func selectTab(_ tab: TabModel, forward: Bool? = nil) {
+        selectedExtensionExperienceID = tab.experienceID
+        if currentView != tab.view {
+            currentView = tab.view
+        }
+        if let forward {
+            tabSwitchForward = forward
+        }
+    }
+
     @Published var statsSecondRowExpansion: CGFloat = 1
     @Published var notesLayoutState: NotesLayoutState = .list
     @Published var selectedExtensionExperienceID: String?

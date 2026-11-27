@@ -84573,6 +84573,156 @@
         }
       },
       "shouldTranslate" : false
+    },
+    "Horizontal swipe action" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Действие при горизонтальном свайпе"
+          }
+        }
+      }
+    },
+    "Tabs" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вкладки"
+          }
+        }
+      }
+    },
+    "Automatically add screenshots to Shelf" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Автоматически добавлять снимки экрана на полку"
+          }
+        }
+      }
+    },
+    "Capture area directly to Shelf" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снять область экрана и сохранить на полку"
+          }
+        }
+      }
+    },
+    "Screenshots" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снимки экрана"
+          }
+        }
+      }
+    },
+    "Screenshot" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Снимок экрана"
+          }
+        }
+      }
+    },
+    "Atoll imports new files saved by macOS Screenshot. The Shelf shortcut captures an area without using the clipboard." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Atoll добавляет новые снимки, сохранённые macOS. Сочетание клавиш для полки сохраняет снимок области экрана без буфера обмена."
+          }
+        }
+      }
+    },
+    "Codex approvals in the notch" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подтверждение действий Codex в шторке"
+          }
+        }
+      }
+    },
+    "Copy Codex hook configuration" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скопировать конфигурацию хука Codex"
+          }
+        }
+      }
+    },
+    "Hook configuration copied" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Конфигурация хука скопирована"
+          }
+        }
+      }
+    },
+    "Add the copied configuration to ~/.codex/hooks.json, merging it with any existing hooks. Restart Codex and trust the Atoll hook in /hooks." : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавьте скопированную конфигурацию в ~/.codex/hooks.json, сохранив другие хуки. Перезапустите Codex и подтвердите доверие к хуку Atoll через /hooks."
+          }
+        }
+      }
+    },
+    "Codex approval required" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex запрашивает подтверждение"
+          }
+        }
+      }
+    },
+    "Defer to Codex" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Решить в Codex"
+          }
+        }
+      }
+    },
+    "Continue with the usual Codex approval prompt" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть стандартный запрос подтверждения Codex"
+          }
+        }
+      }
+    },
+    "Allow once" : {
+      "localizations" : {
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешить один раз"
+          }
+        }
+      }
     }
   },
   "version" : "1.2"

@@ -90,7 +90,7 @@ struct ShelfDropService {
     /// Builds a `.file` item, recording the path alongside the bookmark so that
     /// dedup, drag-out and the context menu never have to resolve the bookmark
     /// on the main actor.
-    private static func fileItem(for url: URL, isTemporary: Bool) async -> ShelfItem? {
+    static func fileItem(for url: URL, isTemporary: Bool) async -> ShelfItem? {
         guard let bookmark = createBookmark(for: url) else { return nil }
         return await ShelfItem(
             kind: .file(bookmark: bookmark),

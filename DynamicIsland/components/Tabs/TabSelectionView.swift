@@ -51,7 +51,6 @@ struct TabSelectionView: View {
     @State private var showQuickSharePopover = false
     @Default(.enableTimerFeature) var enableTimerFeature
     @Default(.enableStatsFeature) var enableStatsFeature
-    @Default(.enableColorPickerFeature) var enableColorPickerFeature
     @Default(.timerDisplayMode) var timerDisplayMode
     @Default(.enableThirdPartyExtensions) private var enableThirdPartyExtensions
     @Default(.enableExtensionNotchExperiences) private var enableExtensionNotchExperiences
@@ -60,12 +59,21 @@ struct TabSelectionView: View {
     @Default(.showMirror) private var showMirror
     @Default(.showStandardMediaControls) private var showStandardMediaControls
     @Default(.enableMinimalisticUI) private var enableMinimalisticUI
+    @Default(.dynamicShelf) private var dynamicShelf
+    @Default(.enableLLMUsageFeature) private var enableLLMUsageFeature
+    @Default(.enableNotes) private var enableNotes
+    @Default(.enableClipboardManager) private var enableClipboardManager
+    @Default(.clipboardDisplayMode) private var clipboardDisplayMode
+    @Default(.enableTerminalFeature) private var enableTerminalFeature
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace var animation
-    
-    private var tabs: [TabModel] {
+
+    private var tabs: [TabModel] { Self.availableTabs(experiences: extensionNotchExperienceManager.activeExperiences) }
+
+    static func availableTabs(experiences: [ExtensionNotchExperiencePayload]) -> [TabModel] {
         var tabsArray: [TabModel] = []
 
-        if homeTabVisible {
+        if Defaults[.enableMinimalisticUI] || Defaults[.showStandardMediaControls] || Defaults[.showCalendar] || Defaults[.showMirror] {
             tabsArray.append(TabModel(label: "Home", icon: "house.fill", view: .home))
         }
 
@@ -73,7 +81,7 @@ struct TabSelectionView: View {
             tabsArray.append(TabModel(label: "Shelf", icon: "tray.fill", view: .shelf))
         }
         
-        if enableTimerFeature && timerDisplayMode == .tab {
+        if Defaults[.enableTimerFeature] && Defaults[.timerDisplayMode] == .tab {
             tabsArray.append(TabModel(label: "Timer", icon: "timer", view: .timer))
         }
 
@@ -95,8 +103,8 @@ struct TabSelectionView: View {
         if Defaults[.enableTerminalFeature] {
             tabsArray.append(TabModel(label: "Terminal", icon: "apple.terminal", view: .terminal))
         }
-        if extensionTabsEnabled {
-            for payload in extensionTabPayloads {
+        if Defaults[.enableThirdPartyExtensions] && Defaults[.enableExtensionNotchExperiences] && Defaults[.enableExtensionNotchTabs] {
+            for payload in experiences {
                 guard let tab = payload.descriptor.tab else { continue }
                 let accent = payload.descriptor.accentColor.swiftUIColor
                 let iconName = tab.iconSymbolName ?? "puzzlepiece.extension"
@@ -114,17 +122,20 @@ struct TabSelectionView: View {
         return tabsArray
     }
     var body: some View {
+        let displayedTabs = tabs
         HStack(spacing: 24) {
-            ForEach(Array(tabs.enumerated()), id: \.element.id) { idx, tab in
+            ForEach(displayedTabs) { tab in
                 let isSelected = isSelected(tab)
                 let activeAccent = tab.accentColor ?? .white
 
                 // Render the tab button
                 TabButton(label: tab.label, icon: tab.icon, selected: isSelected) {
-                    if tab.view == .extensionExperience {
-                        coordinator.selectedExtensionExperienceID = tab.experienceID
+                    let direction = displayedTabs.firstIndex(where: { $0.id == tab.id }).map { index in
+                        index >= (displayedTabs.firstIndex(where: isSelected) ?? 0)
                     }
-                    coordinator.currentView = tab.view
+                    withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+                        coordinator.selectTab(tab, forward: direction)
+                    }
                 }
                 .frame(height: 26)
                 .foregroundStyle(isSelected ? activeAccent : .gray)
@@ -141,29 +152,12 @@ struct TabSelectionView: View {
                             .hidden()
                     }
                 }
-
-                
             }
         }
         .clipShape(Capsule())
         .onAppear {
-            ensureValidSelection(with: tabs)
+            ensureValidSelection(with: displayedTabs)
         }
-    }
-
-    private var extensionTabsEnabled: Bool {
-        enableThirdPartyExtensions && enableExtensionNotchExperiences && enableExtensionNotchTabs
-    }
-
-    private var extensionTabPayloads: [ExtensionNotchExperiencePayload] {
-        extensionNotchExperienceManager.activeExperiences.filter { $0.descriptor.tab != nil }
-    }
-
-    private var homeTabVisible: Bool {
-        if enableMinimalisticUI {
-            return true
-        }
-        return showStandardMediaControls || showCalendar || showMirror
     }
 
     private func isSelected(_ tab: TabModel) -> Bool {
@@ -180,12 +174,7 @@ struct TabSelectionView: View {
             return
         }
         guard let first = tabs.first else { return }
-        if first.view == .extensionExperience {
-            coordinator.selectedExtensionExperienceID = first.experienceID
-        } else {
-            coordinator.selectedExtensionExperienceID = nil
-        }
-        coordinator.currentView = first.view
+        coordinator.selectTab(first)
     }
 }
 

@@ -395,6 +395,10 @@ func getScreenFrame(_ screen: String? = nil) -> CGRect? {
     return nil
 }
 
+func expandedShelfDropArea(closedNotchSize: CGSize) -> CGSize {
+    CGSize(width: closedNotchSize.width + 144, height: closedNotchSize.height + 96)
+}
+
 func getClosedNotchSize(screen: String? = nil) -> CGSize {
     // Default notch size, to avoid using optionals
     var notchHeight: CGFloat = Defaults[.nonNotchHeight]

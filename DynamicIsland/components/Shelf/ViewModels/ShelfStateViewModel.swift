@@ -34,6 +34,7 @@ final class ShelfStateViewModel: ObservableObject {
         }
     }
 
+    @Published private(set) var latestScreenshotID: ShelfItem.ID?
     @Published var isLoading: Bool = false
 
     var isEmpty: Bool { items.isEmpty }
@@ -130,6 +131,14 @@ final class ShelfStateViewModel: ObservableObject {
         ExtensionRPCServer.shared.notifyShelfItemsChanged(itemIDs: addedIDs, action: "added")
     }
 
+    func addScreenshots(_ screenshots: [ShelfItem]) -> Bool {
+        let count = items.count
+        add(screenshots)
+        guard items.count > count else { return false }
+        latestScreenshotID = items.last?.id
+        return true
+    }
+
     func remove(_ item: ShelfItem) {
         item.cleanupStoredData()
         items.removeAll { $0.id == item.id }
@@ -216,21 +225,18 @@ final class ShelfStateViewModel: ObservableObject {
     func cleanupInvalidItems() {
         Task { [weak self] in
             guard let self else { return }
-            var keep: [ShelfItem] = []
+            var invalid: [ShelfItem.ID: Data] = [:]
             for item in self.items {
-                switch item.kind {
-                case .file(let data):
-                    let bookmark = Bookmark(data: data)
-                    if await bookmark.validate() {
-                        keep.append(item)
-                    } else {
-                        item.cleanupStoredData()
-                    }
-                default:
-                    keep.append(item)
-                }
+                guard case .file(let data) = item.kind else { continue }
+                if !(await Bookmark(data: data).validate()) { invalid[item.id] = data }
             }
-            await MainActor.run { self.items = keep }
+            guard !invalid.isEmpty else { return }
+            self.items.removeAll { item in
+                guard case .file(let data) = item.kind, invalid[item.id] == data else { return false }
+                item.cleanupStoredData()
+                return true
+            }
+            self.invalidateURLCache()
         }
     }
 

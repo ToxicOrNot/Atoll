@@ -235,6 +235,8 @@ private enum SettingsSearchIndex {
         SettingsSearchEntry(tab: .general, title: "Also keep the display awake", keywords: ["caffeinate", "keep awake", "display sleep", "screen"], highlightID: SettingsTab.general.highlightID(for: "Also keep the display awake")),
         SettingsSearchEntry(tab: .general, title: "Enable gestures", keywords: ["gestures", "trackpad"], highlightID: SettingsTab.general.highlightID(for: "Enable gestures")),
         SettingsSearchEntry(tab: .general, title: "Close gesture", keywords: ["pinch", "swipe"], highlightID: SettingsTab.general.highlightID(for: "Close gesture")),
+        SettingsSearchEntry(tab: .general, title: "Codex approvals in the notch", keywords: ["codex", "permissions", "approval", "hook"], highlightID: SettingsTab.general.highlightID(for: "Codex approvals in the notch")),
+        SettingsSearchEntry(tab: .general, title: "Horizontal swipe action", keywords: ["trackpad", "tabs", "music"], highlightID: SettingsTab.general.highlightID(for: "Horizontal swipe action")),
         SettingsSearchEntry(tab: .general, title: "Reverse swipe gestures", keywords: ["reverse", "swipe", "media"], highlightID: SettingsTab.general.highlightID(for: "Reverse swipe gestures")),
         SettingsSearchEntry(tab: .general, title: "Reverse scroll gestures", keywords: ["reverse", "scroll", "open", "close"], highlightID: SettingsTab.general.highlightID(for: "Reverse scroll gestures")),
         SettingsSearchEntry(tab: .general, title: "Extend hover area", keywords: ["hover", "cursor"], highlightID: SettingsTab.general.highlightID(for: "Extend hover area")),
@@ -352,6 +354,7 @@ private enum SettingsSearchIndex {
         // Shelf
         SettingsSearchEntry(tab: .shelf, title: "Enable shelf", keywords: ["shelf", "dock"], highlightID: SettingsTab.shelf.highlightID(for: "Enable shelf")),
         SettingsSearchEntry(tab: .shelf, title: "Open shelf tab by default if items added", keywords: ["auto open", "shelf tab"], highlightID: SettingsTab.shelf.highlightID(for: "Open shelf tab by default if items added")),
+        SettingsSearchEntry(tab: .shelf, title: "Automatically add screenshots to Shelf", keywords: ["shelf", "screenshot", "capture"], highlightID: SettingsTab.shelf.highlightID(for: "Automatically add screenshots to Shelf")),
         SettingsSearchEntry(tab: .shelf, title: "Expanded drag detection area", keywords: ["shelf", "drag"], highlightID: SettingsTab.shelf.highlightID(for: "Expanded drag detection area")),
         SettingsSearchEntry(tab: .shelf, title: "Copy items on drag", keywords: ["shelf", "drag", "copy"], highlightID: SettingsTab.shelf.highlightID(for: "Copy items on drag")),
         SettingsSearchEntry(tab: .shelf, title: "Remove from shelf after dragging", keywords: ["shelf", "drag", "remove"], highlightID: SettingsTab.shelf.highlightID(for: "Remove from shelf after dragging")),
@@ -1137,6 +1140,9 @@ struct GeneralSettings: View {
     @Default(.enableMinimalisticUI) var enableMinimalisticUI
     @Default(.showBatteryIndicator) var showBatteryIndicator
     @Default(.showMinimalisticBatteryIndicator) var showMinimalisticBatteryIndicator
+    @Default(.codexNotchApprovals) private var codexNotchApprovals
+    @State private var copiedCodexHook = false
+    @Default(.horizontalSwipeAction) private var horizontalSwipeAction
     @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
     @Default(.musicGestureBehavior) var musicGestureBehavior
     @Default(.reverseSwipeGestures) var reverseSwipeGestures
@@ -1326,6 +1332,25 @@ struct GeneralSettings: View {
             NotchBehaviour()
 
             gestureControls()
+
+            Section("Codex") {
+                Defaults.Toggle(key: .codexNotchApprovals) { Text("Codex approvals in the notch") }
+                    .settingsHighlight(id: highlightID("Codex approvals in the notch"))
+                if codexNotchApprovals {
+                    Button {
+                        guard let configuration = CodexApprovalManager.hookConfiguration else { return }
+                        NSPasteboard.general.clearContents()
+                        copiedCodexHook = NSPasteboard.general.setString(configuration, forType: .string)
+                    } label: {
+                        Text(copiedCodexHook ? LocalizedStringKey("Hook configuration copied")
+                             : LocalizedStringKey("Copy Codex hook configuration"))
+                    }
+                    .disabled(CodexApprovalManager.hookConfiguration == nil)
+                    Text("Add the copied configuration to ~/.codex/hooks.json, merging it with any existing hooks. Restart Codex and trust the Atoll hook in /hooks.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .toolbar {
             Button("Quit app") {
@@ -1350,27 +1375,36 @@ struct GeneralSettings: View {
             .disabled(!openNotchOnHover)
             .settingsHighlight(id: highlightID("Enable gestures"))
             if enableGestures {
-                Defaults.Toggle(key: .enableHorizontalMusicGestures) {
-                    Text("Media change with horizontal gestures")
-                }
-                .settingsHighlight(id: highlightID("Horizontal media gestures"))
+                SettingsSegmentedPicker(
+                    "Horizontal swipe action",
+                    selection: $horizontalSwipeAction,
+                    items: Array(HorizontalSwipeAction.allCases)
+                ) { $0.displayName }
+                .settingsHighlight(id: highlightID("Horizontal swipe action"))
 
-                if enableHorizontalMusicGestures {
-                    SettingsSegmentedPicker(
-                        "Gesture skip behavior",
-                        selection: $musicGestureBehavior,
-                        items: Array(MusicSkipBehavior.allCases)
-                    ) { $0.displayName }
-                    .settingsHighlight(id: highlightID("Gesture skip behavior"))
-
-                    Text(musicGestureBehavior.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Defaults.Toggle(key: .reverseSwipeGestures) {
-                        Text("Reverse swipe gestures")
+                if horizontalSwipeAction == .media {
+                    Defaults.Toggle(key: .enableHorizontalMusicGestures) {
+                        Text("Media change with horizontal gestures")
                     }
-                    .settingsHighlight(id: highlightID("Reverse swipe gestures"))
+                    .settingsHighlight(id: highlightID("Horizontal media gestures"))
+
+                    if enableHorizontalMusicGestures {
+                        SettingsSegmentedPicker(
+                            "Gesture skip behavior",
+                            selection: $musicGestureBehavior,
+                            items: Array(MusicSkipBehavior.allCases)
+                        ) { $0.displayName }
+                        .settingsHighlight(id: highlightID("Gesture skip behavior"))
+
+                        Text(musicGestureBehavior.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Defaults.Toggle(key: .reverseSwipeGestures) {
+                            Text("Reverse swipe gestures")
+                        }
+                        .settingsHighlight(id: highlightID("Reverse swipe gestures"))
+                    }
                 }
 
                 Defaults.Toggle(key: .closeGestureEnabled) {
@@ -4510,6 +4544,20 @@ struct Shelf: View {
                 HStack {
                     Text("General")
                 }
+            }
+
+            Section("Screenshots") {
+                Defaults.Toggle(key: .autoImportScreenshotsToShelf) {
+                    Text("Automatically add screenshots to Shelf")
+                }
+                .settingsHighlight(id: highlightID("Automatically add screenshots to Shelf"))
+
+                KeyboardShortcuts.Recorder("Capture area directly to Shelf", name: .captureAreaToShelf)
+                    .disabled(!Defaults[.enableShortcuts])
+
+                Text("Atoll imports new files saved by macOS Screenshot. The Shelf shortcut captures an area without using the clipboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

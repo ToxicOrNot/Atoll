@@ -74,6 +74,11 @@ struct ContentView: View {
     @Default(.enableReminderLiveActivity) var enableReminderLiveActivity
     @Default(.enableTimerFeature) var enableTimerFeature
     @Default(.timerDisplayMode) var timerDisplayMode
+    @Default(.horizontalSwipeAction) private var horizontalSwipeAction
+    @Default(.enableGestures) private var gesturesEnabled
+    @Default(.dynamicShelf) private var dynamicShelf
+    @Default(.expandedDragDetection) private var expandedDragDetection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
     @Default(.reminderPresentationStyle) var reminderPresentationStyle
     @Default(.timerShowsCountdown) var timerShowsCountdown
@@ -97,6 +102,12 @@ struct ContentView: View {
     @Default(.hideNonNotchUntilHover) var hideNonNotchUntilHover
     @Default(.terminalStickyMode) var terminalStickyMode
     
+    @ObservedObject private var codexApprovals = CodexApprovalManager.shared
+
+    private var codexApproval: CodexApprovalManager.Request? {
+        interactionsEnabled ? codexApprovals.request(for: vm) : nil
+    }
+
     // Battery settings reactivity
     @Default(.showPowerStatusNotifications) var showPowerStatusNotifications
     @Default(.showChargingBatteryHUD) var showChargingBatteryHUD
@@ -109,6 +120,11 @@ struct ContentView: View {
     // Dynamic sizing based on view type and graph count with smooth transitions
     var dynamicNotchSize: CGSize {
         let baseSize = Defaults[.enableMinimalisticUI] ? minimalisticOpenNotchSize(isDynamicIslandMode: isDynamicIslandMode) : openNotchSize
+
+        if codexApproval != nil, vm.notchState == .open {
+            let minimum = CodexApprovalManager.minimumNotchSize
+            return CGSize(width: max(baseSize.width, minimum.width), height: max(baseSize.height, minimum.height))
+        }
 
         if isConnectivityHUDVisible,
            let connectivitySize = NetworkConnectivityHUDMetrics.size(
@@ -251,6 +267,8 @@ struct ContentView: View {
     @State private var isHoveringClosedMusicWaveformControl: Bool = false
 
     @State private var gestureProgress: CGFloat = .zero
+    @State private var shelfOpenedForDrag = false
+    @State private var shelfDragExitTask: Task<Void, Never>?
     @State private var skipGestureActiveDirection: MusicManager.SkipDirection?
     @State private var isMusicControlWindowVisible = false
     @State private var pendingMusicControlTask: Task<Void, Never>?
@@ -309,6 +327,7 @@ struct ContentView: View {
     // MARK: - Tab switch direction for smooth transitions
     
     private var tabSwitchTransition: AnyTransition {
+        if reduceMotion { return .opacity }
         if coordinator.tabSwitchForward {
             return .asymmetric(
                 insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -726,11 +745,13 @@ struct ContentView: View {
                         }
                         openNotch()
                     }
-                    .conditionalModifier(Defaults[.enableGestures]) { view in
+                    .conditionalModifier(gesturesEnabled) { view in
+                        view.panGesture(direction: .down) { translation, phase in
+                            handleDownGesture(translation: translation, phase: phase)
+                        }
+                    }
+                    .conditionalModifier(gesturesEnabled && horizontalSwipeAction == .media) { view in
                         view
-                            .panGesture(direction: .down) { translation, phase in
-                                handleDownGesture(translation: translation, phase: phase)
-                            }
                             .panGesture(direction: .left) { translation, phase in
                                 handleSkipGesture(direction: .forward, translation: translation, phase: phase)
                             }
@@ -738,8 +759,15 @@ struct ContentView: View {
                                 handleSkipGesture(direction: .backward, translation: translation, phase: phase)
                             }
                     }
+                    .conditionalModifier(gesturesEnabled && horizontalSwipeAction == .tabs) { view in
+                        view.background(TabSwipeMonitor(
+                            threshold: Defaults[.gestureSensitivity] * 0.45,
+                            isEnabled: { canSwitchTabs },
+                            onSwipe: switchTab
+                        ))
+                    }
             }
-            .conditionalModifier((Defaults[.closeGestureEnabled] || Defaults[.reverseScrollGestures]) && Defaults[.enableGestures] && interactionsEnabled) { view in
+            .conditionalModifier((Defaults[.closeGestureEnabled] || Defaults[.reverseScrollGestures]) && gesturesEnabled && interactionsEnabled) { view in
                 view
                     .panGesture(direction: .up) { translation, phase in
                         handleUpGesture(translation: translation, phase: phase)
@@ -1283,7 +1311,13 @@ struct ContentView: View {
               .zIndex(2)
               
               ZStack {
-                  if vm.notchState == .open {
+                  if vm.notchState == .open, let approval = codexApproval {
+                      CodexApprovalCard(request: approval) { decision in
+                          codexApprovals.decide(decision, for: approval)
+                      }
+                      .id(approval.id)
+                      .transition(reduceMotion ? .opacity : .blurReplace)
+                  } else if vm.notchState == .open {
                       Group {
                           switch coordinator.currentView {
                               case .home:
@@ -1312,7 +1346,7 @@ struct ContentView: View {
                                 }
                           }
                       }
-                      .id(coordinator.currentView)
+                      .id(tabContentID)
                       .transition(tabSwitchTransition)
                   }
               }
@@ -1320,7 +1354,8 @@ struct ContentView: View {
               .allowsHitTesting(vm.notchState == .open)
               .blur(radius: abs(gestureProgress) > 0.3 ? min(abs(gestureProgress), 8) : 0)
               .opacity(abs(gestureProgress) > 0.3 ? min(abs(gestureProgress * 2), 0.8) : 1)
-              .animation(.smooth(duration: 0.3), value: coordinator.currentView)
+              .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: tabContentID)
+              .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: codexApproval?.id)
           }
       }
 
@@ -2063,31 +2098,57 @@ struct ContentView: View {
     
     @ViewBuilder
     var dragDetector: some View {
-        if lockScreenManager.isLocked {
-            EmptyView()
-        } else if Defaults[.dynamicShelf] && !Defaults[.enableMinimalisticUI] {
+        if interactionsEnabled && dynamicShelf && !enableMinimalisticUI && codexApproval == nil {
+            let closedSize = CGSize(width: vm.closedNotchSize.width, height: max(vm.closedNotchSize.height, 20))
+            let area = expandedDragDetection ? expandedShelfDropArea(closedNotchSize: closedSize) : closedSize
             Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: area.width, height: area.height)
                 .contentShape(Rectangle())
-                .onDrop(of: [.data], isTargeted: $vm.dragDetectorTargeting) { _ in true }
-                .onChange(of: vm.anyDropZoneTargeting) { _, isTargeted in
-                    if isTargeted, vm.notchState == .closed {
-                        coordinator.currentView = .shelf
-                        openNotch()
-                    } else if !isTargeted {
-                        if vm.dropEvent {
-                            vm.dropEvent = false
-                            return
-                        }
-
+                .onDrop(of: [.fileURL, .url, .utf8PlainText, .plainText, .image, .data],
+                        isTargeted: $vm.shelfActivationTargeting) { providers in
+                    guard !providers.isEmpty, !ShelfSelectionModel.shared.isDragging else { return false }
+                    vm.dropEvent = true
+                    showShelfForDrag()
+                    ShelfStateViewModel.shared.load(providers)
+                    return true
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .onChange(of: vm.shelfActivationTargeting) { _, targeted in
+                    if targeted && !ShelfSelectionModel.shared.isDragging {
+                        showShelfForDrag()
+                    }
+                }
+                .onChange(of: vm.anyDropZoneTargeting) { _, targeted in
+                    shelfDragExitTask?.cancel()
+                    guard !targeted else { return }
+                    // AppKit sends exit before enter when the expanding Shelf takes over the drop.
+                    shelfDragExitTask = Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(160))
+                        guard !Task.isCancelled, !vm.anyDropZoneTargeting else { return }
+                        let shouldClose = shelfOpenedForDrag && !vm.dropEvent && !isHovering
                         vm.dropEvent = false
-                        if !shouldPreventAutoClose() {
+                        shelfOpenedForDrag = false
+                        if shouldClose, vm.notchState == .open, !shouldPreventAutoClose() {
                             vm.close()
                         }
                     }
                 }
-        } else {
-            EmptyView()
+                .onDisappear {
+                    shelfDragExitTask?.cancel()
+                    vm.shelfActivationTargeting = false
+                    vm.dropEvent = false
+                    shelfOpenedForDrag = false
+                }
+        }
+    }
+
+    private func showShelfForDrag() {
+        guard vm.notchState == .closed || coordinator.currentView != .shelf else { return }
+        AppDelegate.shared?.cancelPendingNotchAutoClose()
+        shelfOpenedForDrag = shelfOpenedForDrag || vm.notchState == .closed
+        withAnimation(reduceMotion ? nil : vm.animation) {
+            coordinator.currentView = .shelf
+            if vm.notchState == .closed { vm.open(focusRecentClipboard: false) }
         }
     }
 
@@ -2475,7 +2536,7 @@ struct ContentView: View {
         // Without this, the hover-exit timer closes the panel mid-drag, tearing
         // down the NSView that is acting as the drag source and cancelling the
         // session — an independent second cause of "drag-out doesn't work".
-        coordinator.firstLaunch || hasAnyActivePopovers() || vm.isAutoCloseSuppressed || ShelfSelectionModel.shared.isDragging || ClipboardManager.shared.isDraggingItem || SharingStateManager.shared.preventNotchClose || (Defaults[.terminalStickyMode] && coordinator.currentView == .terminal)
+        coordinator.firstLaunch || codexApproval != nil || vm.anyDropZoneTargeting || hasAnyActivePopovers() || vm.isAutoCloseSuppressed || ShelfSelectionModel.shared.isDragging || ClipboardManager.shared.isDraggingItem || SharingStateManager.shared.preventNotchClose || (Defaults[.terminalStickyMode] && coordinator.currentView == .terminal)
     }
     
     // Helper to prevent rapid haptic feedback
@@ -2622,7 +2683,7 @@ struct ContentView: View {
     }
 
     private func handleCloseScrollGesture(translation: CGFloat, phase: NSEvent.Phase) {
-        guard vm.notchState == .open, !vm.isHoveringCalendar, !vm.isScrollGestureActive else { return }
+        guard vm.notchState == .open, codexApproval == nil, !vm.isHoveringCalendar, !vm.isScrollGestureActive else { return }
 
         withAnimation(.smooth) {
             gestureProgress = (translation / Defaults[.gestureSensitivity]) * -20
@@ -2645,6 +2706,34 @@ struct ContentView: View {
                 triggerHapticIfAllowed()
             }
         }
+    }
+
+    private var tabContentID: String {
+        if coordinator.currentView == .extensionExperience {
+            return "extension-\(coordinator.selectedExtensionExperienceID ?? "")"
+        }
+        return String(describing: coordinator.currentView)
+    }
+
+    private var canSwitchTabs: Bool {
+        vm.notchState == .open && interactionsEnabled && !enableMinimalisticUI
+            && !hasAnyActivePopovers() && !vm.isHoveringCalendar && !vm.isScrollGestureActive
+            && !vm.anyDropZoneTargeting && codexApproval == nil
+    }
+
+    private func switchTab(forward: Bool) {
+        let tabs = TabSelectionView.availableTabs(experiences: extensionNotchExperienceManager.activeExperiences)
+        guard !tabs.isEmpty else { return }
+        let current = tabs.firstIndex { tab in
+            tab.view == coordinator.currentView && (tab.view != .extensionExperience
+                || tab.experienceID == coordinator.selectedExtensionExperienceID)
+        }
+        let next = current.map { $0 + (forward ? 1 : -1) } ?? (forward ? 0 : tabs.count - 1)
+        guard tabs.indices.contains(next) else { return }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+            coordinator.selectTab(tabs[next], forward: forward)
+        }
+        if Defaults[.enableHaptics] { triggerHapticIfAllowed() }
     }
 
     private func handleSkipGesture(direction: MusicManager.SkipDirection, translation: CGFloat, phase: NSEvent.Phase) {

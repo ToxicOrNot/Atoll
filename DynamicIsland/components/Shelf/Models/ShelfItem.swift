@@ -212,8 +212,9 @@ struct ShelfItem: Identifiable, Codable, Equatable, Sendable {
         // Only resolve bookmark for temporary items - persisted items don't need cleanup
         guard isTemporary, case .file = kind, let url = resolvedFileURL else { return }
 
-        // Handle temporary files
-        TemporaryFileStorageService.shared.removeTemporaryFileIfNeeded(at: url)
+        if !ShelfPersistenceService.removeManagedCapture(at: url) {
+            TemporaryFileStorageService.shared.removeTemporaryFileIfNeeded(at: url)
+        }
     }
 }
 

@@ -77,7 +77,6 @@ struct ContentView: View {
     @Default(.horizontalSwipeAction) private var horizontalSwipeAction
     @Default(.enableGestures) private var gesturesEnabled
     @Default(.dynamicShelf) private var dynamicShelf
-    @Default(.expandedDragDetection) private var expandedDragDetection
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Default(.enableHorizontalMusicGestures) var enableHorizontalMusicGestures
     @Default(.reminderPresentationStyle) var reminderPresentationStyle
@@ -2100,9 +2099,8 @@ struct ContentView: View {
     var dragDetector: some View {
         if interactionsEnabled && dynamicShelf && !enableMinimalisticUI && codexApproval == nil {
             let closedSize = CGSize(width: vm.closedNotchSize.width, height: max(vm.closedNotchSize.height, 20))
-            let area = expandedDragDetection ? expandedShelfDropArea(closedNotchSize: closedSize) : closedSize
             Color.clear
-                .frame(width: area.width, height: area.height)
+                .frame(width: closedSize.width, height: closedSize.height)
                 .contentShape(Rectangle())
                 .onDrop(of: [.fileURL, .url, .utf8PlainText, .plainText, .image, .data],
                         isTargeted: $vm.shelfActivationTargeting) { providers in
@@ -2116,6 +2114,20 @@ struct ContentView: View {
                 .onChange(of: vm.shelfActivationTargeting) { _, targeted in
                     if targeted && !ShelfSelectionModel.shared.isDragging {
                         showShelfForDrag()
+                    }
+                }
+                .onChange(of: vm.nativeShelfTargeting) { _, targeted in
+                    if targeted { showShelfForDrag() }
+                }
+                .onAppear {
+                    vm.onShelfFileDrop = { urls in
+                        vm.dropEvent = true
+                        showShelfForDrag()
+                        Task { @MainActor in
+                            let items = await ShelfDropService.items(from: urls)
+                            ShelfStateViewModel.shared.add(items)
+                        }
+                        return true
                     }
                 }
                 .onChange(of: vm.anyDropZoneTargeting) { _, targeted in
@@ -2135,7 +2147,9 @@ struct ContentView: View {
                 }
                 .onDisappear {
                     shelfDragExitTask?.cancel()
+                    vm.onShelfFileDrop = nil
                     vm.shelfActivationTargeting = false
+                    vm.nativeShelfTargeting = false
                     vm.dropEvent = false
                     shelfOpenedForDrag = false
                 }
@@ -2213,6 +2227,8 @@ struct ContentView: View {
     /// `.onDisappear` and from `vm.onViewTeardown` on window close. Idempotent.
     private func performViewTeardown() {
         menuBarLayout.stopTracking()
+        vm.onShelfFileDrop = nil
+        shelfDragExitTask?.cancel()
         hoverTask?.cancel()
         stopHoverClickMonitor()
         removeStickyTerminalClickMonitor()

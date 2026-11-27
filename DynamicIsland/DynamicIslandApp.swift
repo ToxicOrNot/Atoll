@@ -166,6 +166,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         installTopMenuItemsIfNeeded()
+        AccessibilityPermissionStore.shared.refreshStatus()
+        FullDiskAccessPermissionStore.shared.refreshStatus()
+        ShelfFolderAccessPermissionStore.shared.refreshStatus()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -426,6 +429,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
 
+        window.shelfViewModel = viewModel
         window.animationBehavior = .none
         // collectionBehavior is configured in DynamicIslandWindow.init
 
@@ -436,6 +440,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 //.moveToSky()
         )
         
+        // A window-level destination can see Finder drags in the transparent part
+        // of the panel. SwiftUI's visible Shelf and share targets keep their own drops.
+        window.registerForDraggedTypes([.fileURL])
         window.orderFrontRegardless()
         NotchSpaceManager.shared.notchSpace.windows.insert(window)
         //SkyLightOperator.shared.delegateWindow(window)
@@ -1234,6 +1241,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         openDevTools.target = self
 
+        let requestInputMonitoring = NSMenuItem(
+            title: String(localized: "Request Input Monitoring"),
+            action: #selector(requestInputMonitoringAccess),
+            keyEquivalent: ""
+        )
+        requestInputMonitoring.target = self
+
+        permissionsSubmenu.addItem(requestInputMonitoring)
+        permissionsSubmenu.addItem(NSMenuItem.separator())
         permissionsSubmenu.addItem(requestFullDisk)
         permissionsSubmenu.addItem(openFullDisk)
         permissionsSubmenu.addItem(NSMenuItem.separator())
@@ -1312,6 +1328,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openAccessibilitySettings() {
         AccessibilityPermissionStore.shared.openSystemSettings()
+    }
+
+    @objc private func requestInputMonitoringAccess() {
+        AccessibilityPermissionStore.shared.requestInputMonitoring()
     }
 
     @objc private func requestFullDiskAccess() {

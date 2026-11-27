@@ -57,13 +57,19 @@ final class ScreenshotSnippingTool: ObservableObject {
         }
     }
 
+    static func requestScreenRecordingAccess() -> Bool {
+        if CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() { return true }
+        AccessibilityPermissionStore.openPrivacyPane("ScreenCapture")
+        return false
+    }
+
     @discardableResult
     func startSnipping(
         type: ScreenshotType = .area,
         destination: URL? = nil,
         completion: @escaping (URL) -> Void
     ) -> Bool {
-        guard !isSnipping else { return false }
+        guard !isSnipping, Self.requestScreenRecordingAccess() else { return false }
         let url = destination ?? ScreenAssistantManager.screenshotDataDirectory
             .appendingPathComponent("screenshot_\(UUID().uuidString).png")
         let directory = url.deletingLastPathComponent()

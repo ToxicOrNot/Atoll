@@ -4447,6 +4447,7 @@ private final class SettingsLoopingPlayerController {
 }
 
 struct Shelf: View {
+    @State private var hasScreenRecordingAccess = CGPreflightScreenCaptureAccess()
     @Default(.quickShareProvider) var quickShareProvider
     @Default(.expandedDragDetection) var expandedDragDetection
     @Default(.copyOnDrag) var copyOnDrag
@@ -4554,6 +4555,15 @@ struct Shelf: View {
 
                 KeyboardShortcuts.Recorder("Capture area directly to Shelf", name: .captureAreaToShelf)
                     .disabled(!Defaults[.enableShortcuts])
+
+                if !hasScreenRecordingAccess {
+                    Button("Request Screen Recording Access") {
+                        hasScreenRecordingAccess = ScreenshotSnippingTool.requestScreenRecordingAccess()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                        hasScreenRecordingAccess = CGPreflightScreenCaptureAccess()
+                    }
+                }
 
                 Text("Atoll imports new files saved by macOS Screenshot. The Shelf shortcut captures an area without using the clipboard.")
                     .font(.caption)

@@ -32,6 +32,8 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
     @Published private(set) var notchState: NotchState = .closed
 
     @Published var shelfActivationTargeting = false
+    @Published var nativeShelfTargeting = false
+    var onShelfFileDrop: (([URL]) -> Bool)?
     @Published var dragDetectorTargeting: Bool = false
     @Published var dropZoneTargeting: Bool = false
     @Published var dropEvent: Bool = false
@@ -162,8 +164,8 @@ class DynamicIslandViewModel: NSObject, ObservableObject {
         notchSize = getClosedNotchSize(screen: screen)
         closedNotchSize = notchSize
 
-        Publishers.CombineLatest3($dropZoneTargeting, $dragDetectorTargeting, $shelfActivationTargeting)
-            .map { $0 || $1 || $2 }
+        Publishers.CombineLatest4($dropZoneTargeting, $dragDetectorTargeting, $shelfActivationTargeting, $nativeShelfTargeting)
+            .map { $0 || $1 || $2 || $3 }
             .removeDuplicates()
             .assign(to: \.anyDropZoneTargeting, on: self)
             .store(in: &cancellables)

@@ -79,7 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The separate-tab clipboard now uses the same card grid (two columns) with drag-out and per-item delete, replacing the single-column list (#698).
 
 ### Fixed
-- Shelf opens sooner during a drag when the expanded drop area is enabled. Quick drops in that area are saved to Shelf. (#2)
+- A native file drop destination detects Finder drags in the expanded area below the notch and accepts quick drops into Shelf. (#2)
+- Atoll requests Screen Recording for direct screenshots, exposes an Input Monitoring request, and refreshes permission status on return from System Settings. (#2)
 - A tab count in the notch settings could not be formatted. `%lld tab%@ enabled · min %lld px` was translated using `%1lld` — missing the `$` — so it was never parsed as a positional specifier, and the separator was U+22C5 (dot operator) rather than the U+00B7 the source uses. (#789)
 - The microphone privacy indicator description showed an unrelated sentence about a meeting start time, which also introduced a `%@` that the source string does not have — reading an argument that was never passed. (#789)
 - A shipped string began with `추천 번역 ⭐️: `, an AI suggestion prefix that had been committed along with the translation it labelled. (#789)

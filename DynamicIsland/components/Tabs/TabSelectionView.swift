@@ -125,11 +125,11 @@ struct TabSelectionView: View {
         let displayedTabs = tabs
         HStack(spacing: 24) {
             ForEach(displayedTabs) { tab in
-                let isSelected = isSelected(tab)
+                let selected = isSelected(tab)
                 let activeAccent = tab.accentColor ?? .white
 
                 // Render the tab button
-                TabButton(label: tab.label, icon: tab.icon, selected: isSelected) {
+                TabButton(label: tab.label, icon: tab.icon, selected: selected) {
                     let direction = displayedTabs.firstIndex(where: { $0.id == tab.id }).map { index in
                         index >= (displayedTabs.firstIndex(where: isSelected) ?? 0)
                     }
@@ -138,9 +138,9 @@ struct TabSelectionView: View {
                     }
                 }
                 .frame(height: 26)
-                .foregroundStyle(isSelected ? activeAccent : .gray)
+                .foregroundStyle(selected ? activeAccent : .gray)
                 .background {
-                    if isSelected {
+                    if selected {
                         Capsule()
                             .fill((tab.accentColor ?? Color(nsColor: .secondarySystemFill)).opacity(0.25))
                             .shadow(color: (tab.accentColor ?? .clear).opacity(0.4), radius: 8)
